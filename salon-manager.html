@@ -312,6 +312,7 @@ function loadData(){
   if(!data.paymentMethods){ data.paymentMethods = [ {id:uid(), name:'Cash', feePercent:0}, {id:uid(), name:'Credit Card', feePercent:2.9} ]; changed = true; }
   data.paymentMethods.forEach(p=>{ if(p.feePercent===undefined){ p.feePercent = 0; changed = true; } });
   data.sales.forEach((s,idx)=>{ if(!s.receiptNumber){ s.receiptNumber = idx+1; changed = true; } });
+  data.sales.forEach(s=>{ if(!s.status){ s.status = 'completed'; changed = true; } });
   if(changed) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   return data;
 }
@@ -894,14 +895,14 @@ function startOfMonth(d){
 
 function renderReports(){
   const sales = getFilteredSales();
-  const totalSubtotal = sales.reduce((s,x)=>s+x.subtotal,0);
-  const totalDiscount = sales.reduce((s,x)=>s+x.discountAmt,0);
-  const totalTax = sales.reduce((s,x)=>s+x.taxAmt,0);
-  const totalSales = sales.reduce((s,x)=>s+x.total,0);
+  const activeSales = sales.filter(s=>s.status!=='cancelled');
+  const totalSubtotal = activeSales.reduce((s,x)=>s+x.subtotal,0);
+  const totalTax = activeSales.reduce((s,x)=>s+x.taxAmt,0);
+  const totalSales = activeSales.reduce((s,x)=>s+x.total,0);
 
-  // group by payment method
+  // group by payment method (active sales only)
   const groups = {};
-  sales.forEach(s=>{
+  activeSales.forEach(s=>{
     const key = s.paymentMethodId || 'none';
     if(!groups[key]){
       const pm = paymentMethodById(s.paymentMethodId);
@@ -939,11 +940,12 @@ function renderReports(){
     </div>
 
     <div class="card" style="margin-bottom:24px;">
-      <h3 style="margin-bottom:14px;font-size:15px;">Sales Ledger</h3>
+      <h3 style="margin-bottom:4px;font-size:15px;">Sales Ledger</h3>
+      <p class="small-muted" style="margin-bottom:14px;">Cancelled sales are kept for your records but excluded from totals below.</p>
       ${sales.length===0 ? `<div class="empty"><div class="big">&#128202;</div>No sales in this date range.</div>` :
-      `<table><thead><tr><th>Date</th><th>Receipt #</th><th>Client</th><th>Payment Method</th><th>Subtotal</th><th>Tax</th><th>Total</th></tr></thead><tbody>
+      `<table><thead><tr><th>Date</th><th>Receipt #</th><th>Client</th><th>Payment Method</th><th>Subtotal</th><th>Tax</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>
         ${sales.map(s=>`
-          <tr>
+          <tr style="${s.status==='cancelled'?'opacity:0.5;':''}">
             <td>${fmtDate(s.date)}</td>
             <td>#${s.receiptNumber}</td>
             <td>${escapeHtml(clientName(s.clientId))}</td>
@@ -951,15 +953,24 @@ function renderReports(){
             <td>${fmtMoney(s.subtotal)}</td>
             <td>${fmtMoney(s.taxAmt)}</td>
             <td>${fmtMoney(s.total)}</td>
+            <td><span class="badge ${s.status==='cancelled'?'cancelled':'completed'}">${s.status}</span></td>
+            <td style="text-align:right;white-space:nowrap;">
+              <button class="icon-btn" data-action="view-receipt" data-id="${s.id}" title="View receipt">&#128196;</button>
+              <button class="icon-btn" data-action="edit-sale" data-id="${s.id}" title="Edit">&#9998;</button>
+              ${s.status==='cancelled'
+                ? `<button class="icon-btn" data-action="restore-sale" data-id="${s.id}" title="Restore">&#8635;</button>`
+                : `<button class="icon-btn" data-action="cancel-sale" data-id="${s.id}" title="Cancel">&#10005;</button>`}
+            </td>
           </tr>
         `).join('')}
       </tbody>
       <tfoot>
         <tr style="font-weight:700;">
-          <td colspan="4">Totals</td>
+          <td colspan="4">Totals (excludes cancelled)</td>
           <td>${fmtMoney(totalSubtotal)}</td>
           <td>${fmtMoney(totalTax)}</td>
           <td>${fmtMoney(totalSales)}</td>
+          <td colspan="2"></td>
         </tr>
       </tfoot>
       </table>`}
@@ -1001,9 +1012,9 @@ function renderReports(){
 
 function exportReportCsv(){
   const sales = getFilteredSales();
-  const rows = [['Date','Receipt #','Client','Payment Method','Subtotal','Tax','Total']];
+  const rows = [['Date','Receipt #','Client','Payment Method','Subtotal','Tax','Total','Status']];
   sales.forEach(s=>{
-    rows.push([s.date, s.receiptNumber, clientName(s.clientId), s.paymentMethodName||'', s.subtotal.toFixed(2), s.taxAmt.toFixed(2), s.total.toFixed(2)]);
+    rows.push([s.date, s.receiptNumber, clientName(s.clientId), s.paymentMethodName||'', s.subtotal.toFixed(2), s.taxAmt.toFixed(2), s.total.toFixed(2), s.status]);
   });
   const csv = rows.map(r=>r.map(cell=>{
     const v = String(cell);
@@ -1016,6 +1027,153 @@ function exportReportCsv(){
   a.download = 'salon-report-' + todayStr() + '.csv';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/* ---------------- Edit Sale Modal ---------------- */
+let editSaleState = null;
+
+function openEditSaleModal(saleId){
+  const sale = DATA.sales.find(s=>s.id===saleId);
+  if(!sale) return;
+  editSaleState = {
+    saleId: sale.id,
+    clientId: sale.clientId,
+    date: sale.date,
+    time: sale.time,
+    items: sale.items.map(i=>({...i})),
+    discount: sale.discount,
+    taxRate: sale.taxRate,
+    paymentMethodId: sale.paymentMethodId
+  };
+  renderEditSaleModal();
+}
+
+function editSaleModalHtml(){
+  const subtotal = editSaleState.items.reduce((s,i)=>s+i.price,0);
+  const discountAmt = subtotal * (editSaleState.discount/100);
+  const afterDiscount = Math.max(0, subtotal - discountAmt);
+  const taxAmt = afterDiscount * (editSaleState.taxRate/100);
+  const total = afterDiscount + taxAmt;
+  return `
+    <div class="modal wide">
+      <div class="modal-header"><h3>Edit Sale</h3><button class="modal-close" data-close-modal>&#10005;</button></div>
+      <div class="modal-body">
+        <div class="field-row">
+          <div class="field"><label>Date</label><input type="date" id="esDate" value="${editSaleState.date}"></div>
+          <div class="field"><label>Time</label><input type="time" id="esTime" value="${editSaleState.time}"></div>
+        </div>
+        <div class="field">
+          <label>Client</label>
+          <select id="esClient">
+            <option value="">Walk-in / No client</option>
+            ${DATA.clients.sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}" ${editSaleState.clientId===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Line Items</label>
+          ${editSaleState.items.map((it,idx)=>`
+            <div class="field-row" style="align-items:center;margin-bottom:8px;">
+              <div class="field" style="margin-bottom:0;flex:2;"><input type="text" class="esItemName" data-idx="${idx}" value="${escapeHtml(it.name)}"></div>
+              <div class="field" style="max-width:100px;margin-bottom:0;"><input type="number" class="esItemPrice" data-idx="${idx}" step="0.01" value="${it.price}"></div>
+              <button class="icon-btn esRemoveItem" data-idx="${idx}" title="Remove">&#128465;</button>
+            </div>
+          `).join('') || `<div class="small-muted" style="margin-bottom:10px;">No items.</div>`}
+          <div class="field-row" style="align-items:flex-end;">
+            <div class="field">
+              <label>Add a service</label>
+              <select id="esAddServiceSelect">
+                <option value="">-- select --</option>
+                ${DATA.services.map(s=>`<option value="${s.id}">${escapeHtml(s.name)} (${fmtMoney(s.price)})</option>`).join('')}
+              </select>
+            </div>
+            <button class="btn secondary sm" id="esAddServiceBtn" style="margin-bottom:14px;">Add</button>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Discount (%)</label><input type="number" id="esDiscount" min="0" max="100" value="${editSaleState.discount}"></div>
+          <div class="field"><label>Tax Rate (%)</label><input type="number" id="esTaxRate" min="0" step="0.01" value="${editSaleState.taxRate}"></div>
+        </div>
+        <div class="field">
+          <label>Payment Method</label>
+          <select id="esPaymentMethod">
+            <option value="">-- select --</option>
+            ${DATA.paymentMethods.map(p=>`<option value="${p.id}" ${editSaleState.paymentMethodId===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="cart-total-row"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
+        <div class="cart-total-row"><span>Discount</span><span>-${fmtMoney(discountAmt)}</span></div>
+        <div class="cart-total-row"><span>Tax</span><span>${fmtMoney(taxAmt)}</span></div>
+        <div class="cart-total-row grand"><span>Total</span><span>${fmtMoney(total)}</span></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" data-close-modal>Cancel</button>
+        <button class="btn" id="saveEditSaleBtn">Save Changes</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderEditSaleModal(){
+  openModal(editSaleModalHtml());
+  attachEditSaleHandlers();
+}
+
+function attachEditSaleHandlers(){
+  document.getElementById('esDate').addEventListener('change', e=>{ editSaleState.date = e.target.value; });
+  document.getElementById('esTime').addEventListener('change', e=>{ editSaleState.time = e.target.value; });
+  document.getElementById('esClient').addEventListener('change', e=>{ editSaleState.clientId = e.target.value; });
+  document.getElementById('esDiscount').addEventListener('change', e=>{ editSaleState.discount = Number(e.target.value)||0; renderEditSaleModal(); });
+  document.getElementById('esTaxRate').addEventListener('change', e=>{ editSaleState.taxRate = Number(e.target.value)||0; renderEditSaleModal(); });
+  document.getElementById('esPaymentMethod').addEventListener('change', e=>{ editSaleState.paymentMethodId = e.target.value; });
+  document.querySelectorAll('.esItemName').forEach(inp=>inp.addEventListener('change', e=>{
+    editSaleState.items[Number(e.currentTarget.dataset.idx)].name = e.target.value;
+  }));
+  document.querySelectorAll('.esItemPrice').forEach(inp=>inp.addEventListener('change', e=>{
+    editSaleState.items[Number(e.currentTarget.dataset.idx)].price = Number(e.target.value)||0;
+    renderEditSaleModal();
+  }));
+  document.querySelectorAll('.esRemoveItem').forEach(btn=>btn.addEventListener('click', e=>{
+    editSaleState.items.splice(Number(e.currentTarget.dataset.idx),1);
+    renderEditSaleModal();
+  }));
+  document.getElementById('esAddServiceBtn').addEventListener('click', ()=>{
+    const sel = document.getElementById('esAddServiceSelect');
+    const sid = sel.value;
+    if(!sid) return;
+    const s = serviceById(sid);
+    editSaleState.items.push({serviceId:sid, name:s.name, price:s.price});
+    renderEditSaleModal();
+  });
+  document.getElementById('saveEditSaleBtn').addEventListener('click', saveEditedSale);
+}
+
+function saveEditedSale(){
+  const sale = DATA.sales.find(s=>s.id===editSaleState.saleId);
+  if(!sale) return;
+  if(editSaleState.items.length===0){ toast('A sale needs at least one item'); return; }
+  const subtotal = editSaleState.items.reduce((s,i)=>s+i.price,0);
+  const discountAmt = subtotal * (editSaleState.discount/100);
+  const afterDiscount = Math.max(0, subtotal - discountAmt);
+  const taxAmt = afterDiscount * (editSaleState.taxRate/100);
+  const total = afterDiscount + taxAmt;
+  const pm = paymentMethodById(editSaleState.paymentMethodId);
+  Object.assign(sale, {
+    clientId: editSaleState.clientId,
+    date: editSaleState.date,
+    time: editSaleState.time,
+    items: editSaleState.items,
+    discount: editSaleState.discount,
+    subtotal, discountAmt,
+    taxRate: editSaleState.taxRate, taxAmt,
+    total,
+    paymentMethodId: editSaleState.paymentMethodId,
+    paymentMethodName: pm ? pm.name : ''
+  });
+  saveData();
+  editSaleState = null;
+  closeModal();
+  render();
+  toast('Sale updated');
 }
 
 /* ---------------- Event Handling ---------------- */
@@ -1229,6 +1387,19 @@ function handleAction(action, id, el){
   if(action==='report-week'){ reportFrom=startOfWeek(todayStr()); reportTo=todayStr(); return render(); }
   if(action==='report-month'){ reportFrom=startOfMonth(todayStr()); reportTo=todayStr(); return render(); }
   if(action==='export-report-csv'){ exportReportCsv(); return; }
+  if(action==='edit-sale'){ openEditSaleModal(id); return; }
+  if(action==='cancel-sale'){
+    if(confirm('Cancel this sale? It will be kept for your records but excluded from totals.')){
+      const s = DATA.sales.find(s=>s.id===id);
+      if(s){ s.status='cancelled'; saveData(); render(); toast('Sale cancelled'); }
+    }
+    return;
+  }
+  if(action==='restore-sale'){
+    const s = DATA.sales.find(s=>s.id===id);
+    if(s){ s.status='completed'; saveData(); render(); toast('Sale restored'); }
+    return;
+  }
   if(action==='view-receipt'){
     const sale = DATA.sales.find(s=>s.id===id);
     if(sale) openReceiptModal(sale);
@@ -1253,7 +1424,8 @@ function handleAction(action, id, el){
       paymentMethodId: checkoutState.paymentMethodId,
       paymentMethodName: pm ? pm.name : '',
       date: todayStr(),
-      time: new Date().toTimeString().slice(0,5)
+      time: new Date().toTimeString().slice(0,5),
+      status: 'completed'
     };
     DATA.sales.push(sale);
     if(checkoutState.linkedAppointmentId){
