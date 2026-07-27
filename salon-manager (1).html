@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Salon Manager</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap');
+
+  :root{
+    --bg:#F6F1F2;
+    --surface:#FFFFFF;
+    --surface-alt:#FBF7F8;
+    --primary:#7D4F5C;
+    --primary-dark:#5E3945;
+    --primary-light:#F1E4E7;
+    --accent:#C9A876;
+    --text:#2B2129;
+    --text-muted:#8A7A80;
+    --success:#5F8566;
+    --success-light:#E7EFE7;
+    --danger:#B5544A;
+    --danger-light:#F6E7E5;
+    --border:#E9DFE2;
+    --radius:10px;
+    --shadow:0 1px 2px rgba(43,33,41,0.06), 0 4px 16px rgba(43,33,41,0.04);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);}
+  h1,h2,h3{font-family:'Fraunces',Georgia,serif;font-weight:600;margin:0;}
+  button{font-family:inherit;cursor:pointer;}
+  input,select,textarea{font-family:inherit;}
+
+  .app{display:flex;min-height:100vh;}
+
+  /* Sidebar */
+  .sidebar{width:220px;background:var(--primary-dark);color:#fff;display:flex;flex-direction:column;padding:24px 0;flex-shrink:0;}
+  .brand{padding:0 24px 24px;border-bottom:1px solid rgba(255,255,255,0.12);margin-bottom:16px;}
+  .brand h1{font-size:20px;color:#fff;letter-spacing:0.3px;}
+  .brand span{display:block;font-size:12px;color:var(--accent);margin-top:2px;letter-spacing:1.5px;text-transform:uppercase;}
+  .nav-item{display:flex;align-items:center;gap:12px;padding:12px 24px;color:rgba(255,255,255,0.75);text-decoration:none;font-size:14px;font-weight:500;border-left:3px solid transparent;transition:all .15s;}
+  .nav-item:hover{background:rgba(255,255,255,0.06);color:#fff;}
+  .nav-item.active{background:rgba(255,255,255,0.1);color:#fff;border-left-color:var(--accent);}
+  .nav-item .ic{font-size:16px;width:18px;text-align:center;}
+  .sidebar-footer{margin-top:auto;padding:16px 24px 0;}
+
+  /* Main */
+  .main{flex:1;padding:32px 40px;overflow-y:auto;}
+  .page-header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;}
+  .page-header h2{font-size:26px;}
+  .page-header .sub{color:var(--text-muted);font-size:14px;margin-top:4px;}
+
+  .btn{display:inline-flex;align-items:center;gap:6px;background:var(--primary);color:#fff;border:none;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600;transition:background .15s;}
+  .btn:hover{background:var(--primary-dark);}
+  .btn.secondary{background:var(--surface);color:var(--primary);border:1px solid var(--border);}
+  .btn.secondary:hover{background:var(--primary-light);}
+  .btn.danger{background:var(--danger);}
+  .btn.danger:hover{background:#973f37;}
+  .btn.sm{padding:6px 12px;font-size:13px;}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+
+  .grid{display:grid;gap:16px;}
+  .cards-3{grid-template-columns:repeat(3,1fr);}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);}
+  .stat-card .label{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:600;}
+  .stat-card .value{font-family:'Fraunces',serif;font-size:32px;margin-top:6px;color:var(--primary-dark);}
+
+  table{width:100%;border-collapse:collapse;}
+  th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);padding:10px 12px;border-bottom:1px solid var(--border);}
+  td{padding:12px;border-bottom:1px solid var(--border);font-size:14px;}
+  tr:last-child td{border-bottom:none;}
+  tr:hover td{background:var(--surface-alt);}
+  tfoot td{border-top:2px solid var(--border);border-bottom:none;background:var(--surface-alt);}
+
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;}
+  .badge.scheduled{background:var(--primary-light);color:var(--primary-dark);}
+  .badge.completed{background:var(--success-light);color:var(--success);}
+  .badge.cancelled{background:var(--danger-light);color:var(--danger);}
+
+  .empty{text-align:center;padding:48px 20px;color:var(--text-muted);}
+  .empty .big{font-size:32px;margin-bottom:8px;}
+
+  input[type=text],input[type=tel],input[type=email],input[type=date],input[type=time],input[type=number],select,textarea{
+    width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff;color:var(--text);
+  }
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--primary);outline-offset:1px;}
+  label{font-size:13px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:6px;}
+  .field{margin-bottom:14px;}
+  .field-row{display:flex;gap:12px;}
+  .field-row .field{flex:1;}
+
+  /* Modal */
+  .overlay{position:fixed;inset:0;background:rgba(43,33,41,0.45);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px;}
+  .modal{background:#fff;border-radius:14px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.25);}
+  .modal.wide{max-width:640px;}
+  .modal-header{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
+  .modal-header h3{font-size:19px;}
+  .modal-close{background:none;border:none;font-size:20px;color:var(--text-muted);line-height:1;}
+  .modal-body{padding:24px;}
+  .modal-footer{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px;}
+
+  .search-bar{margin-bottom:20px;}
+  .toolbar{display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap;}
+  .toolbar input[type=date]{width:auto;}
+
+  .client-list{display:flex;flex-direction:column;gap:8px;}
+  .client-row{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;cursor:pointer;transition:border-color .15s;}
+  .client-row:hover{border-color:var(--primary);}
+  .client-row .name{font-weight:600;}
+  .client-row .meta{font-size:13px;color:var(--text-muted);margin-top:2px;}
+
+  .service-pick{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer;}
+  .service-pick:hover{border-color:var(--primary);}
+  .service-pick.selected{border-color:var(--primary);background:var(--primary-light);}
+  .service-pick .name{font-weight:500;}
+  .service-pick .price{font-weight:600;color:var(--primary-dark);}
+
+  .checkout-layout{display:grid;grid-template-columns:1fr 340px;gap:24px;}
+  .cart{position:sticky;top:32px;}
+  .cart-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:14px;}
+  .cart-item button{background:none;border:none;color:var(--danger);font-size:13px;}
+  .cart-total-row{display:flex;justify-content:space-between;padding:6px 0;font-size:14px;}
+  .cart-total-row.grand{font-size:20px;font-weight:700;font-family:'Fraunces',serif;color:var(--primary-dark);padding-top:12px;margin-top:6px;border-top:1px solid var(--border);}
+
+  .toast{position:fixed;bottom:24px;right:24px;background:var(--success);color:#fff;padding:14px 20px;border-radius:10px;box-shadow:var(--shadow);font-size:14px;font-weight:600;z-index:200;animation:slideIn .2s ease;}
+  @keyframes slideIn{from{transform:translateY(10px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+
+  .history-item{padding:12px 0;border-bottom:1px solid var(--border);}
+  .history-item:last-child{border-bottom:none;}
+  .history-item .top{display:flex;justify-content:space-between;font-size:13px;color:var(--text-muted);}
+  .icon-btn{background:none;border:none;color:var(--text-muted);font-size:15px;padding:4px 8px;}
+  .icon-btn:hover{color:var(--primary);}
+  .small-muted{font-size:12px;color:var(--text-muted);}
+  .link-btn{background:none;border:none;color:var(--primary);font-size:12px;font-weight:600;padding:0;text-decoration:underline;}
+
+  .admin-section{margin-bottom:28px;}
+  .admin-section h3{font-size:15px;margin-bottom:14px;}
+  .payment-row, .service-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .payment-row input, .service-row input{margin-bottom:0;}
+
+  .quick-add-box{border:1px dashed var(--border);border-radius:8px;padding:12px;margin-top:10px;}
+  .quick-add-box .field-row{align-items:flex-end;}
+
+  /* Receipt */
+  .receipt{font-family:'Inter',monospace;font-size:13px;color:#111;}
+  .receipt h2{font-size:18px;text-align:center;}
+  .receipt .center{text-align:center;}
+  .receipt .divider{border-top:1px dashed #999;margin:12px 0;}
+  .receipt table{width:100%;font-size:13px;}
+  .receipt td{padding:4px 0;border:none;font-size:13px;}
+  .receipt .rt{text-align:right;}
+  .receipt .totals-row{display:flex;justify-content:space-between;padding:2px 0;font-size:13px;}
+  .receipt .grand-total{display:flex;justify-content:space-between;font-weight:700;font-size:16px;padding-top:8px;margin-top:6px;border-top:1px dashed #999;}
+
+  @media print{
+    body *{visibility:hidden;}
+    #receiptPrintArea, #receiptPrintArea *{visibility:visible;}
+    #receiptPrintArea{position:absolute;top:0;left:0;width:100%;padding:20px;}
+    .modal-footer, .modal-close{display:none;}
+  }
+</style>
+</head>
+<body>
+<div id="loginScreen" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);">
+  <div class="card" style="width:100%;max-width:360px;">
+    <h2 style="margin-bottom:4px;">Salon Manager</h2>
+    <p class="small-muted" style="margin-bottom:20px;">Sign in to access your data</p>
+    <div class="field"><label>Email</label><input type="email" id="loginEmail"></div>
+    <div class="field"><label>Password</label><input type="password" id="loginPassword"></div>
+    <div id="loginError" style="color:var(--danger);font-size:13px;margin-bottom:12px;"></div>
+    <button class="btn" id="loginBtn" style="width:100%;justify-content:center;">Sign In</button>
+  </div>
+</div>
+<div id="reconnectBanner" style="display:none;background:var(--accent);color:#2B2129;padding:10px 20px;text-align:center;font-size:14px;font-weight:600;">
+  This browser needs permission to keep saving to your linked data file.
+  <button id="reconnectBtn" class="btn sm" style="margin-left:10px;">Reconnect</button>
+</div>
+<div class="app" style="display:none;">
+  <div class="sidebar">
+    <div class="brand">
+      <h1 id="salonNameDisplay">My Salon</h1>
+      <span>Local Manager</span>
+    </div>
+    <a class="nav-item" data-page="dashboard"><span class="ic">&#9679;</span> Dashboard</a>
+    <a class="nav-item" data-page="appointments"><span class="ic">&#128197;</span> Appointments</a>
+    <a class="nav-item" data-page="clients"><span class="ic">&#128100;</span> Clients</a>
+    <a class="nav-item" data-page="checkout"><span class="ic">&#128176;</span> Checkout</a>
+    <a class="nav-item" data-page="reports"><span class="ic">&#128202;</span> Reports</a>
+    <a class="nav-item" data-page="admin"><span class="ic">&#9881;</span> Admin</a>
+    <div class="sidebar-footer">
+      <button class="settings-btn" id="signOutBtn">Sign Out</button>
+    </div>
+  </div>
+  <div class="main" id="main"></div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyC6sR0qfpJ_0Z6ftYR4FpnIPqOVMi26dwU",
+  authDomain: "mgsalon-3fae9.firebaseapp.com",
+  projectId: "mgsalon-3fae9",
+  storageBucket: "mgsalon-3fae9.firebasestorage.app",
+  messagingSenderId: "721911730715",
+  appId: "1:721911730715:web:b483241123ca55624b1ebe",
+  measurementId: "G-69NYP95KWZ"
+};
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+const db = getFirestore(fbApp);
+
+let currentUser = null;
+let unsubscribeSnapshot = null;
+let firestoreLoaded = false;
+
+async function doLogin(){
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+  try{
+    await signInWithEmailAndPassword(auth, email, password);
+  }catch(err){
+    errEl.textContent = 'Could not sign in. Check your email and password.';
+  }
+}
+document.getElementById('loginBtn').addEventListener('click', doLogin);
+document.getElementById('loginPassword').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+document.getElementById('signOutBtn').addEventListener('click', ()=>signOut(auth));
+
+async function connectFirestore(uid){
+  const ref = doc(db, 'salonData', uid);
+  const snap = await getDoc(ref);
+  if(snap.exists()){
+    DATA = snap.data();
+  } else {
+    // first login: seed the cloud with whatever is currently in this browser (or defaults)
+    await setDoc(ref, DATA);
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
+  firestoreLoaded = true;
+  unsubscribeSnapshot = onSnapshot(ref, (docSnap)=>{
+    if(docSnap.exists()){
+      DATA = docSnap.data();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
+      render();
+    }
+  });
+}
+
+async function pushToFirestore(){
+  if(!currentUser) return;
+  try{
+    await setDoc(doc(db, 'salonData', currentUser.uid), DATA);
+  }catch(err){
+    console.error('Cloud sync failed', err);
+    toast('Could not sync to the cloud (saved locally)');
+  }
+}
+
+onAuthStateChanged(auth, async (user)=>{
+  if(user){
+    currentUser = user;
+    document.getElementById('loginScreen').style.display = 'none';
+    document.querySelector('.app').style.display = 'flex';
+    await connectFirestore(user.uid);
+    navigate('dashboard');
+    tryAutoReconnect();
+  } else {
+    currentUser = null;
+    firestoreLoaded = false;
+    if(unsubscribeSnapshot){ unsubscribeSnapshot(); unsubscribeSnapshot = null; }
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.querySelector('.app').style.display = 'none';
+  }
+});
+
+/* ---------------- Data Layer ---------------- */
+const STORAGE_KEY = 'salonManagerData';
+
+function loadData(){
+  let raw = localStorage.getItem(STORAGE_KEY);
+  let data;
+  if(!raw){
+    data = {
+      clients: [],
+      services: [
+        {id: uid(), name:'Haircut', price:45},
+        {id: uid(), name:'Color', price:95},
+        {id: uid(), name:'Blowout', price:35},
+        {id: uid(), name:'Highlights', price:120},
+        {id: uid(), name:'Beard Trim', price:20},
+      ],
+      appointments: [],
+      sales: [],
+      business: { name:'My Salon', address:'', phone:'', email:'', taxRate: 0, receiptNote:'Thank you for visiting!' },
+      paymentMethods: [ {id:uid(), name:'Cash', feePercent:0}, {id:uid(), name:'Credit Card', feePercent:2.9} ]
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    return data;
+  }
+  data = JSON.parse(raw);
+  // migrate older data shape if needed
+  let changed = false;
+  if(!data.business){ data.business = { name: data.salonName || 'My Salon', address:'', phone:'', email:'', taxRate:0, receiptNote:'Thank you for visiting!' }; changed = true; }
+  if(!data.paymentMethods){ data.paymentMethods = [ {id:uid(), name:'Cash', feePercent:0}, {id:uid(), name:'Credit Card', feePercent:2.9} ]; changed = true; }
+  data.paymentMethods.forEach(p=>{ if(p.feePercent===undefined){ p.feePercent = 0; changed = true; } });
+  data.sales.forEach((s,idx)=>{ if(!s.receiptNumber){ s.receiptNumber = idx+1; changed = true; } });
+  data.sales.forEach(s=>{ if(!s.status){ s.status = 'completed'; changed = true; } });
+  if(changed) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  return data;
+}
+function saveData(){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
+  if(fileConnected) writeToFile();
+  pushToFirestore();
+}
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+
+let DATA = loadData();
+
+/* ---------------- File System Access (optional real-file storage) ---------------- */
+const FS_SUPPORTED = 'showSaveFilePicker' in window;
+let fileHandle = null;
+let fileConnected = false;
+let pendingReconnect = false;
+
+const IDB_NAME = 'salonManagerFS';
+function idbOpen(){
+  return new Promise((resolve,reject)=>{
+    const req = indexedDB.open(IDB_NAME,1);
+    req.onupgradeneeded = ()=>{ req.result.createObjectStore('handles'); };
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+async function idbGet(key){
+  const db = await idbOpen();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction('handles','readonly');
+    const r = tx.objectStore('handles').get(key);
+    r.onsuccess = ()=>resolve(r.result || null);
+    r.onerror = ()=>reject(r.error);
+  });
+}
+async function idbSet(key,val){
+  const db = await idbOpen();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction('handles','readwrite');
+    tx.objectStore('handles').put(val,key);
+    tx.oncomplete = ()=>resolve();
+    tx.onerror = ()=>reject(tx.error);
+  });
+}
+async function idbDelete(key){
+  const db = await idbOpen();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction('handles','readwrite');
+    tx.objectStore('handles').delete(key);
+    tx.oncomplete = ()=>resolve();
+    tx.onerror = ()=>reject(tx.error);
+  });
+}
+
+async function writeToFile(){
+  if(!fileHandle) return;
+  try{
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(DATA,null,2));
+    await writable.close();
+  }catch(err){ console.error('Could not write to linked file', err); }
+}
+
+function mergeImportedData(imported){
+  if(!imported.business) imported.business = { name:'My Salon', address:'', phone:'', email:'', taxRate:0, receiptNote:'' };
+  if(!imported.paymentMethods) imported.paymentMethods = [{id:uid(),name:'Cash'}];
+  return imported;
+}
+
+async function connectNewFile(){
+  try{
+    const handle = await window.showSaveFilePicker({
+      suggestedName: 'salon-data.json',
+      types: [{description:'JSON File', accept:{'application/json':['.json']}}]
+    });
+    fileHandle = handle;
+    fileConnected = true;
+    await idbSet('dataFileHandle', handle);
+    await writeToFile();
+    render();
+    toast('Now saving to ' + handle.name);
+  }catch(err){ if(err.name!=='AbortError') toast('Could not create the file'); }
+}
+
+async function connectExistingFile(){
+  try{
+    const [handle] = await window.showOpenFilePicker({
+      types: [{description:'JSON File', accept:{'application/json':['.json']}}]
+    });
+    const perm = await handle.requestPermission({mode:'readwrite'});
+    if(perm!=='granted'){ toast('Permission was not granted'); return; }
+    const file = await handle.getFile();
+    const text = await file.text();
+    let imported;
+    try{ imported = JSON.parse(text); }catch(e){ toast('That file is not valid data'); return; }
+    if(!imported.clients || !imported.services){ toast('That file is not a valid salon data file'); return; }
+    imported = mergeImportedData(imported);
+    DATA = imported;
+    fileHandle = handle;
+    fileConnected = true;
+    await idbSet('dataFileHandle', handle);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
+    pushToFirestore();
+    render();
+    toast('Connected to ' + handle.name);
+  }catch(err){ if(err.name!=='AbortError') toast('Could not open the file'); }
+}
+
+async function disconnectFile(){
+  fileHandle = null;
+  fileConnected = false;
+  await idbDelete('dataFileHandle');
+  render();
+  toast('Disconnected. Now saving to browser storage only.');
+}
+
+async function reconnectFile(){
+  if(!fileHandle) return;
+  try{
+    const perm = await fileHandle.requestPermission({mode:'readwrite'});
+    if(perm==='granted'){
+      pendingReconnect = false;
+      fileConnected = true;
+      const file = await fileHandle.getFile();
+      const text = await file.text();
+      const imported = mergeImportedData(JSON.parse(text));
+      DATA = imported;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
+      pushToFirestore();
+      document.getElementById('reconnectBanner').style.display = 'none';
+      render();
+      toast('Reconnected to ' + fileHandle.name);
+    } else {
+      toast('Permission was not granted');
+    }
+  }catch(err){ toast('Could not reconnect'); }
+}
+
+async function tryAutoReconnect(){
+  if(!FS_SUPPORTED) return;
+  try{
+    const handle = await idbGet('dataFileHandle');
+    if(!handle) return;
+    fileHandle = handle;
+    const perm = await handle.queryPermission({mode:'readwrite'});
+    if(perm==='granted'){
+      fileConnected = true;
+      const file = await handle.getFile();
+      const text = await file.text();
+      DATA = mergeImportedData(JSON.parse(text));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(DATA));
+      pushToFirestore();
+      render();
+    } else {
+      pendingReconnect = true;
+      document.getElementById('reconnectBanner').style.display = 'block';
+    }
+  }catch(err){ /* handle may be stale; ignore */ }
+}
+
+/* ---------------- Helpers ---------------- */
+function fmtMoney(n){ return '$' + Number(n).toFixed(2); }
+function fmtDate(d){
+  const dt = new Date(d + 'T00:00:00');
+  return dt.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric', year:'numeric'});
+}
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function clientName(id){ const c = DATA.clients.find(c=>c.id===id); return c ? c.name : 'Walk-in'; }
+function serviceById(id){ return DATA.services.find(s=>s.id===id); }
+function paymentMethodById(id){ return DATA.paymentMethods.find(p=>p.id===id); }
+function toast(msg){
+  const el = document.createElement('div');
+  el.className='toast';
+  el.textContent = msg;
+  document.getElementById('toastRoot').appendChild(el);
+  setTimeout(()=>el.remove(), 2400);
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+/* ---------------- Router ---------------- */
+let currentPage = 'dashboard';
+let checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'' };
+
+function navigate(page){
+  currentPage = page;
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.page===page));
+  render();
+}
+document.querySelectorAll('.nav-item').forEach(n=>{
+  n.addEventListener('click', ()=>navigate(n.dataset.page));
+});
+
+function render(){
+  document.getElementById('salonNameDisplay').textContent = DATA.business.name;
+  const main = document.getElementById('main');
+  if(currentPage==='dashboard') main.innerHTML = renderDashboard();
+  else if(currentPage==='appointments') main.innerHTML = renderAppointments();
+  else if(currentPage==='clients') main.innerHTML = renderClients();
+  else if(currentPage==='checkout') main.innerHTML = renderCheckout();
+  else if(currentPage==='reports') main.innerHTML = renderReports();
+  else if(currentPage==='admin') main.innerHTML = renderAdmin();
+  attachPageHandlers();
+}
+
+/* ---------------- Dashboard ---------------- */
+function renderDashboard(){
+  const today = todayStr();
+  const todaysAppts = DATA.appointments.filter(a=>a.date===today && a.status!=='cancelled')
+    .sort((a,b)=>a.time.localeCompare(b.time));
+  const todaysSales = DATA.sales.filter(s=>s.date===today);
+  const todaysTotal = todaysSales.reduce((sum,s)=>sum+s.total,0);
+
+  return `
+    <div class="page-header">
+      <div>
+        <h2>Dashboard</h2>
+        <div class="sub">${fmtDate(today)}</div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn secondary" data-action="new-appt">+ Appointment</button>
+        <button class="btn" data-action="go-checkout">+ New Sale</button>
+      </div>
+    </div>
+    <div class="grid cards-3" style="margin-bottom:28px;">
+      <div class="card stat-card"><div class="label">Today's Appointments</div><div class="value">${todaysAppts.length}</div></div>
+      <div class="card stat-card"><div class="label">Today's Sales</div><div class="value">${fmtMoney(todaysTotal)}</div></div>
+      <div class="card stat-card"><div class="label">Total Clients</div><div class="value">${DATA.clients.length}</div></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-bottom:14px;">Today's Schedule</h3>
+      ${todaysAppts.length===0 ? `<div class="empty"><div class="big">&#9729;</div>No appointments today.</div>` :
+        `<table><thead><tr><th>Time</th><th>Client</th><th>Services</th><th>Status</th></tr></thead><tbody>
+          ${todaysAppts.map(a=>`
+            <tr>
+              <td>${a.time}</td>
+              <td>${escapeHtml(clientName(a.clientId))}</td>
+              <td>${a.serviceIds.map(id=>serviceById(id)?.name||'').join(', ')}</td>
+              <td><span class="badge ${a.status}">${a.status}</span></td>
+            </tr>`).join('')}
+        </tbody></table>`}
+    </div>
+  `;
+}
+
+/* ---------------- Appointments ---------------- */
+let apptFilterDate = todayStr();
+
+function renderAppointments(){
+  const list = DATA.appointments.filter(a=>a.date===apptFilterDate).sort((a,b)=>a.time.localeCompare(b.time));
+  return `
+    <div class="page-header">
+      <div>
+        <h2>Appointments</h2>
+        <div class="sub">Manage your bookings</div>
+      </div>
+      <button class="btn" data-action="new-appt">+ New Appointment</button>
+    </div>
+    <div class="toolbar">
+      <button class="btn secondary sm" data-action="date-prev">&larr;</button>
+      <input type="date" id="apptDateInput" value="${apptFilterDate}">
+      <button class="btn secondary sm" data-action="date-next">&rarr;</button>
+      <button class="btn secondary sm" data-action="date-today">Today</button>
+    </div>
+    <div class="card">
+      ${list.length===0 ? `<div class="empty"><div class="big">&#128197;</div>No appointments on ${fmtDate(apptFilterDate)}.</div>` :
+      `<table><thead><tr><th>Time</th><th>Client</th><th>Services</th><th>Price</th><th>Status</th><th></th></tr></thead><tbody>
+        ${list.map(a=>{
+          const total = a.serviceIds.reduce((s,id)=>s+(serviceById(id)?.price||0),0);
+          return `<tr>
+            <td>${a.time}</td>
+            <td>${escapeHtml(clientName(a.clientId))}</td>
+            <td>${a.serviceIds.map(id=>serviceById(id)?.name||'').join(', ')}</td>
+            <td>${fmtMoney(total)}</td>
+            <td><span class="badge ${a.status}">${a.status}</span></td>
+            <td style="text-align:right;white-space:nowrap;">
+              ${a.status==='scheduled' ? `<button class="icon-btn" data-action="complete-appt" data-id="${a.id}" title="Mark complete">&#10003;</button>
+              <button class="icon-btn" data-action="cancel-appt" data-id="${a.id}" title="Cancel">&#10005;</button>` : ''}
+              <button class="icon-btn" data-action="delete-appt" data-id="${a.id}" title="Delete">&#128465;</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody></table>`}
+    </div>
+  `;
+}
+
+/* ---------------- Clients ---------------- */
+let clientSearch = '';
+let openClientId = null;
+
+function renderClients(){
+  if(openClientId) return renderClientDetail(openClientId);
+  const q = clientSearch.toLowerCase();
+  const list = DATA.clients.filter(c => c.name.toLowerCase().includes(q) || (c.phone||'').includes(q))
+    .sort((a,b)=>a.name.localeCompare(b.name));
+  return `
+    <div class="page-header">
+      <div><h2>Clients</h2><div class="sub">${DATA.clients.length} total</div></div>
+      <button class="btn" data-action="new-client">+ New Client</button>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="clientSearchInput" placeholder="Search by name or phone..." value="${escapeHtml(clientSearch)}">
+    </div>
+    <div class="client-list">
+      ${list.length===0 ? `<div class="empty"><div class="big">&#128100;</div>No clients found.</div>` :
+      list.map(c=>`
+        <div class="client-row" data-action="open-client" data-id="${c.id}">
+          <div>
+            <div class="name">${escapeHtml(c.name)}</div>
+            <div class="meta">${escapeHtml(c.phone||'')} ${c.email?' &middot; '+escapeHtml(c.email):''}</div>
+          </div>
+          <div class="small-muted">&rarr;</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderClientDetail(id){
+  const c = DATA.clients.find(c=>c.id===id);
+  if(!c){ openClientId=null; return renderClients(); }
+  const appts = DATA.appointments.filter(a=>a.clientId===id).sort((a,b)=>(b.date+b.time).localeCompare(a.date+a.time));
+  const sales = DATA.sales.filter(s=>s.clientId===id).sort((a,b)=>(b.date+b.time).localeCompare(a.date+a.time));
+  const totalSpent = sales.reduce((s,x)=>s+x.total,0);
+  return `
+    <div class="page-header">
+      <div>
+        <button class="btn secondary sm" data-action="back-clients" style="margin-bottom:10px;">&larr; All Clients</button>
+        <h2>${escapeHtml(c.name)}</h2>
+        <div class="sub">${escapeHtml(c.phone||'No phone')} ${c.email?' &middot; '+escapeHtml(c.email):''}</div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn secondary" data-action="edit-client" data-id="${c.id}">Edit</button>
+        <button class="btn danger" data-action="delete-client" data-id="${c.id}">Delete</button>
+      </div>
+    </div>
+    <div class="grid cards-3" style="margin-bottom:24px;">
+      <div class="card stat-card"><div class="label">Total Spent</div><div class="value">${fmtMoney(totalSpent)}</div></div>
+      <div class="card stat-card"><div class="label">Visits</div><div class="value">${sales.length}</div></div>
+      <div class="card stat-card"><div class="label">Upcoming</div><div class="value">${appts.filter(a=>a.status==='scheduled').length}</div></div>
+    </div>
+    ${c.notes ? `<div class="card" style="margin-bottom:20px;"><h3 style="font-size:15px;margin-bottom:8px;">Notes</h3><div style="font-size:14px;color:var(--text-muted);">${escapeHtml(c.notes)}</div></div>` : ''}
+    <div class="card">
+      <h3 style="margin-bottom:14px;">History</h3>
+      ${appts.length===0 && sales.length===0 ? `<div class="empty">No history yet.</div>` : `
+        ${appts.map(a=>`
+          <div class="history-item">
+            <div class="top"><span>${fmtDate(a.date)} at ${a.time}</span><span class="badge ${a.status}">${a.status}</span></div>
+            <div>${a.serviceIds.map(id=>serviceById(id)?.name||'').join(', ')}</div>
+          </div>`).join('')}
+        ${sales.map(s=>`
+          <div class="history-item">
+            <div class="top"><span>${fmtDate(s.date)} at ${s.time} &middot; Sale</span><span>${fmtMoney(s.total)}</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span>${s.items.map(i=>i.name).join(', ')}</span>
+              <button class="link-btn" data-action="view-receipt" data-id="${s.id}">View Receipt</button>
+            </div>
+          </div>`).join('')}
+      `}
+    </div>
+  `;
+}
+
+/* ---------------- Checkout ---------------- */
+let showQuickAdd = false;
+
+function renderCheckout(){
+  const todaysAppts = DATA.appointments.filter(a=>a.date===todayStr() && a.status==='scheduled');
+  const subtotal = checkoutState.items.reduce((s,i)=>s+i.price,0);
+  const discountAmt = subtotal * (checkoutState.discount/100);
+  const afterDiscount = Math.max(0, subtotal - discountAmt);
+  const taxRate = DATA.business.taxRate || 0;
+  const taxAmt = afterDiscount * (taxRate/100);
+  const total = afterDiscount + taxAmt;
+
+  return `
+    <div class="page-header">
+      <div><h2>Checkout</h2><div class="sub">Ring up a sale</div></div>
+    </div>
+    <div class="checkout-layout">
+      <div>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="field">
+            <label>Client</label>
+            <select id="checkoutClient">
+              <option value="">Walk-in / No client</option>
+              ${DATA.clients.sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}" ${checkoutState.clientId===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
+            </select>
+          </div>
+          ${todaysAppts.length>0 ? `
+          <div class="field">
+            <label>Load from Today's Appointment (optional)</label>
+            <select id="checkoutAppt">
+              <option value="">-- none --</option>
+              ${todaysAppts.map(a=>`<option value="${a.id}" ${checkoutState.linkedAppointmentId===a.id?'selected':''}>${a.time} &middot; ${escapeHtml(clientName(a.clientId))}</option>`).join('')}
+            </select>
+          </div>` : ''}
+        </div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+            <h3 style="font-size:15px;">Select Services</h3>
+            <button class="btn secondary sm" data-action="toggle-quick-add">${showQuickAdd?'Cancel':'+ Quick Add Service'}</button>
+          </div>
+          ${showQuickAdd ? `
+            <div class="quick-add-box">
+              <div class="field-row">
+                <div class="field"><label>Service name</label><input type="text" id="quickAddName" placeholder="e.g. Deep Conditioning"></div>
+                <div class="field" style="max-width:110px;"><label>Price</label><input type="number" id="quickAddPrice" min="0" step="0.01"></div>
+                <button class="btn sm" id="quickAddBtn" style="margin-bottom:14px;">Add to Sale</button>
+              </div>
+              <p class="small-muted" style="margin-top:-6px;">This also saves it to your services list for next time.</p>
+            </div>
+          ` : ''}
+          ${DATA.services.map(s=>`
+            <div class="service-pick ${checkoutState.items.some(i=>i.serviceId===s.id)?'selected':''}" data-action="toggle-service" data-id="${s.id}">
+              <span class="name">${escapeHtml(s.name)}</span>
+              <span class="price">${fmtMoney(s.price)}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="cart">
+        <div class="card">
+          <h3 style="margin-bottom:14px;font-size:15px;">Cart</h3>
+          ${checkoutState.items.length===0 ? `<div class="small-muted">No services selected.</div>` :
+            checkoutState.items.map((i,idx)=>`
+              <div class="cart-item">
+                <span>${escapeHtml(i.name)}</span>
+                <span>${fmtMoney(i.price)} <button data-action="remove-item" data-idx="${idx}">&#10005;</button></span>
+              </div>
+            `).join('')}
+          <div class="field" style="margin-top:16px;">
+            <label>Discount (%)</label>
+            <input type="number" id="discountInput" min="0" max="100" value="${checkoutState.discount}">
+          </div>
+          <div class="field">
+            <label>Payment Method *</label>
+            <select id="paymentMethodSelect">
+              <option value="">-- select --</option>
+              ${DATA.paymentMethods.map(p=>`<option value="${p.id}" ${checkoutState.paymentMethodId===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="cart-total-row"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
+          <div class="cart-total-row"><span>Discount</span><span>-${fmtMoney(discountAmt)}</span></div>
+          <div class="cart-total-row"><span>Tax (${taxRate}%)</span><span>${fmtMoney(taxAmt)}</span></div>
+          <div class="cart-total-row grand"><span>Total</span><span>${fmtMoney(total)}</span></div>
+          <button class="btn" style="width:100%;justify-content:center;margin-top:16px;" data-action="complete-sale" ${checkoutState.items.length===0?'disabled':''}>Complete Sale</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ---------------- Admin ---------------- */
+function renderAdmin(){
+  const b = DATA.business;
+  return `
+    <div class="page-header">
+      <div><h2>Admin</h2><div class="sub">Business details, tax, payment methods & services</div></div>
+    </div>
+
+    <div class="card admin-section">
+      <h3>Business Details</h3>
+      <div class="field"><label>Business Name</label><input type="text" id="bizName" value="${escapeHtml(b.name)}"></div>
+      <div class="field"><label>Address</label><input type="text" id="bizAddress" value="${escapeHtml(b.address||'')}"></div>
+      <div class="field-row">
+        <div class="field"><label>Phone</label><input type="tel" id="bizPhone" value="${escapeHtml(b.phone||'')}"></div>
+        <div class="field"><label>Email</label><input type="email" id="bizEmail" value="${escapeHtml(b.email||'')}"></div>
+      </div>
+      <div class="field-row">
+        <div class="field" style="max-width:180px;"><label>Sales Tax Rate (%)</label><input type="number" id="bizTax" min="0" step="0.01" value="${b.taxRate}"></div>
+        <div class="field"><label>Receipt Footer Note</label><input type="text" id="bizNote" value="${escapeHtml(b.receiptNote||'')}"></div>
+      </div>
+      <button class="btn" id="saveBizBtn">Save Business Details</button>
+    </div>
+
+    <div class="card admin-section">
+      <h3>Payment Methods</h3>
+      <p class="small-muted" style="margin-top:-8px;margin-bottom:14px;">Fee % is what a processor (like a credit card company) charges you to use that method. It's shown in Reports only — never on customer receipts.</p>
+      <div id="paymentMethodsList">${renderPaymentMethodsList()}</div>
+      <div class="field-row" style="margin-top:10px;align-items:flex-end;">
+        <div class="field"><label>New payment method</label><input type="text" id="newPaymentName" placeholder="e.g. Venmo"></div>
+        <div class="field" style="max-width:100px;"><label>Fee %</label><input type="number" id="newPaymentFee" min="0" step="0.01" value="0"></div>
+        <button class="btn secondary" id="addPaymentBtn" style="margin-bottom:14px;">Add</button>
+      </div>
+    </div>
+
+    <div class="card admin-section">
+      <h3>Services &amp; Pricing</h3>
+      <div id="servicesEditList">${renderServicesEditList()}</div>
+      <div class="field-row" style="margin-top:10px;align-items:flex-end;">
+        <div class="field"><label>New service name</label><input type="text" id="newServiceName"></div>
+        <div class="field" style="max-width:110px;"><label>Price</label><input type="number" id="newServicePrice" min="0" step="0.01"></div>
+        <button class="btn secondary" id="addServiceBtn" style="margin-bottom:14px;">Add</button>
+      </div>
+    </div>
+
+    <div class="card admin-section">
+      <h3>Data File</h3>
+      ${FS_SUPPORTED ? `
+        ${fileConnected ? `
+          <p style="font-size:14px;">Saving directly to: <strong>${escapeHtml(fileHandle ? fileHandle.name : '')}</strong></p>
+          <p class="small-muted" style="margin-bottom:14px;">Every change is written to this file automatically. You can back it up, sync it, or move it to another computer.</p>
+          <button class="btn secondary" id="disconnectFileBtn">Disconnect File</button>
+        ` : `
+          <p class="small-muted" style="margin-bottom:14px;">Link a real file on your computer so data is saved there directly, instead of only inside the browser.</p>
+          <div style="display:flex;gap:10px;">
+            <button class="btn" id="createFileBtn">Create New Data File</button>
+            <button class="btn secondary" id="openFileBtn">Open Existing Data File</button>
+          </div>
+        `}
+      ` : `
+        <p class="small-muted">Your browser doesn't support linking directly to a file (this needs Chrome, Edge, or another Chromium browser). Use the manual backup below instead.</p>
+      `}
+    </div>
+
+    <div class="card admin-section">
+      <h3>Manual Backup</h3>
+      <div style="display:flex;gap:10px;">
+        <button class="btn secondary" id="exportBtn">Export Backup (.json)</button>
+        <label class="btn secondary" style="position:relative;">
+          Import Backup
+          <input type="file" id="importFile" accept=".json" style="position:absolute;inset:0;opacity:0;cursor:pointer;">
+        </label>
+      </div>
+      <p class="small-muted" style="margin-top:8px;">${fileConnected ? 'Even with a linked file, it\'s worth keeping the occasional manual backup too.' : 'All data is stored only in this browser on this computer. Export a backup regularly to avoid losing data if you clear your browser data.'}</p>
+    </div>
+  `;
+}
+
+function renderPaymentMethodsList(){
+  return DATA.paymentMethods.map(p=>`
+    <div class="payment-row" data-payment-id="${p.id}">
+      <input type="text" class="pmName" value="${escapeHtml(p.name)}" style="max-width:220px;">
+      <input type="number" class="pmFee" value="${p.feePercent}" min="0" step="0.01" style="max-width:90px;" title="Processing fee %">
+      <span class="small-muted">% fee</span>
+      <button class="icon-btn removePmBtn" title="Remove">&#128465;</button>
+    </div>
+  `).join('') || `<div class="small-muted">No payment methods yet.</div>`;
+}
+
+function renderServicesEditList(){
+  return DATA.services.map(s=>`
+    <div class="service-row" data-service-id="${s.id}">
+      <div class="field" style="margin-bottom:0;flex:2;"><input type="text" class="svcName" value="${escapeHtml(s.name)}"></div>
+      <div class="field" style="max-width:100px;margin-bottom:0;"><input type="number" class="svcPrice" step="0.01" value="${s.price}"></div>
+      <button class="icon-btn removeSvcBtn" title="Remove">&#128465;</button>
+    </div>
+  `).join('');
+}
+
+/* ---------------- Reports ---------------- */
+let reportFrom = '';
+let reportTo = '';
+
+function getFilteredSales(){
+  return DATA.sales.filter(s=>{
+    if(reportFrom && s.date < reportFrom) return false;
+    if(reportTo && s.date > reportTo) return false;
+    return true;
+  }).sort((a,b)=> (b.date+b.time).localeCompare(a.date+a.time));
+}
+
+function startOfWeek(d){
+  const dt = new Date(d+'T00:00:00');
+  const day = dt.getDay();
+  dt.setDate(dt.getDate() - day);
+  return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+}
+function startOfMonth(d){
+  const dt = new Date(d+'T00:00:00');
+  return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-01';
+}
+
+function renderReports(){
+  const sales = getFilteredSales();
+  const activeSales = sales.filter(s=>s.status!=='cancelled');
+  const totalSubtotal = activeSales.reduce((s,x)=>s+x.subtotal,0);
+  const totalTax = activeSales.reduce((s,x)=>s+x.taxAmt,0);
+  const totalSales = activeSales.reduce((s,x)=>s+x.total,0);
+
+  // group by payment method (active sales only)
+  const groups = {};
+  activeSales.forEach(s=>{
+    const key = s.paymentMethodId || 'none';
+    if(!groups[key]){
+      const pm = paymentMethodById(s.paymentMethodId);
+      groups[key] = { name: s.paymentMethodName || (pm?pm.name:'Unknown'), feePercent: pm ? pm.feePercent : 0, count:0, subtotal:0, tax:0, total:0 };
+    }
+    groups[key].count++;
+    groups[key].subtotal += s.subtotal;
+    groups[key].tax += s.taxAmt;
+    groups[key].total += s.total;
+  });
+  const groupRows = Object.values(groups).sort((a,b)=>b.total-a.total);
+  const totalFees = groupRows.reduce((sum,g)=>sum + g.total*(g.feePercent/100), 0);
+
+  return `
+    <div class="page-header">
+      <div><h2>Reports</h2><div class="sub">Sales ledger and totals</div></div>
+      <button class="btn secondary" data-action="export-report-csv">Export CSV</button>
+    </div>
+
+    <div class="toolbar">
+      <button class="btn secondary sm" data-action="report-all">All Time</button>
+      <button class="btn secondary sm" data-action="report-today">Today</button>
+      <button class="btn secondary sm" data-action="report-week">This Week</button>
+      <button class="btn secondary sm" data-action="report-month">This Month</button>
+      <span class="small-muted">From</span>
+      <input type="date" id="reportFromInput" value="${reportFrom}">
+      <span class="small-muted">To</span>
+      <input type="date" id="reportToInput" value="${reportTo}">
+    </div>
+
+    <div class="grid cards-3" style="margin-bottom:24px;">
+      <div class="card stat-card"><div class="label">Total Subtotal</div><div class="value">${fmtMoney(totalSubtotal)}</div></div>
+      <div class="card stat-card"><div class="label">Total Sales Tax</div><div class="value">${fmtMoney(totalTax)}</div></div>
+      <div class="card stat-card"><div class="label">Total Sales</div><div class="value">${fmtMoney(totalSales)}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:24px;">
+      <h3 style="margin-bottom:4px;font-size:15px;">Sales Ledger</h3>
+      <p class="small-muted" style="margin-bottom:14px;">Cancelled sales are kept for your records but excluded from totals below.</p>
+      ${sales.length===0 ? `<div class="empty"><div class="big">&#128202;</div>No sales in this date range.</div>` :
+      `<table><thead><tr><th>Date</th><th>Receipt #</th><th>Client</th><th>Payment Method</th><th>Subtotal</th><th>Tax</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>
+        ${sales.map(s=>`
+          <tr style="${s.status==='cancelled'?'opacity:0.5;':''}">
+            <td>${fmtDate(s.date)}</td>
+            <td>#${s.receiptNumber}</td>
+            <td>${escapeHtml(clientName(s.clientId))}</td>
+            <td>${escapeHtml(s.paymentMethodName||'-')}</td>
+            <td>${fmtMoney(s.subtotal)}</td>
+            <td>${fmtMoney(s.taxAmt)}</td>
+            <td>${fmtMoney(s.total)}</td>
+            <td><span class="badge ${s.status==='cancelled'?'cancelled':'completed'}">${s.status}</span></td>
+            <td style="text-align:right;white-space:nowrap;">
+              <button class="icon-btn" data-action="view-receipt" data-id="${s.id}" title="View receipt">&#128196;</button>
+              <button class="icon-btn" data-action="edit-sale" data-id="${s.id}" title="Edit">&#9998;</button>
+              ${s.status==='cancelled'
+                ? `<button class="icon-btn" data-action="restore-sale" data-id="${s.id}" title="Restore">&#8635;</button>`
+                : `<button class="icon-btn" data-action="cancel-sale" data-id="${s.id}" title="Cancel">&#10005;</button>`}
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="font-weight:700;">
+          <td colspan="4">Totals (excludes cancelled)</td>
+          <td>${fmtMoney(totalSubtotal)}</td>
+          <td>${fmtMoney(totalTax)}</td>
+          <td>${fmtMoney(totalSales)}</td>
+          <td colspan="2"></td>
+        </tr>
+      </tfoot>
+      </table>`}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:4px;font-size:15px;">By Payment Method</h3>
+      <p class="small-muted" style="margin-bottom:14px;">Fee % is what your processor charges you — set it in Admin. Shown here only, never on customer receipts.</p>
+      ${groupRows.length===0 ? `<div class="empty">No sales in this date range.</div>` :
+      `<table><thead><tr><th>Payment Method</th><th># Sales</th><th>Subtotal</th><th>Tax</th><th>Total</th><th>Fee %</th><th>Fee Amount</th><th>Net After Fee</th></tr></thead><tbody>
+        ${groupRows.map(g=>{
+          const feeAmt = g.total * (g.feePercent/100);
+          const net = g.total - feeAmt;
+          return `<tr>
+            <td>${escapeHtml(g.name)}</td>
+            <td>${g.count}</td>
+            <td>${fmtMoney(g.subtotal)}</td>
+            <td>${fmtMoney(g.tax)}</td>
+            <td>${fmtMoney(g.total)}</td>
+            <td>${g.feePercent}%</td>
+            <td>${fmtMoney(feeAmt)}</td>
+            <td>${fmtMoney(net)}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="font-weight:700;">
+          <td colspan="4">Totals</td>
+          <td>${fmtMoney(totalSales)}</td>
+          <td></td>
+          <td>${fmtMoney(totalFees)}</td>
+          <td>${fmtMoney(totalSales-totalFees)}</td>
+        </tr>
+      </tfoot>
+      </table>`}
+    </div>
+  `;
+}
+
+function exportReportCsv(){
+  const sales = getFilteredSales();
+  const rows = [['Date','Receipt #','Client','Payment Method','Subtotal','Tax','Total','Status']];
+  sales.forEach(s=>{
+    rows.push([s.date, s.receiptNumber, clientName(s.clientId), s.paymentMethodName||'', s.subtotal.toFixed(2), s.taxAmt.toFixed(2), s.total.toFixed(2), s.status]);
+  });
+  const csv = rows.map(r=>r.map(cell=>{
+    const v = String(cell);
+    return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v;
+  }).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'salon-report-' + todayStr() + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ---------------- Edit Sale Modal ---------------- */
+let editSaleState = null;
+
+function openEditSaleModal(saleId){
+  const sale = DATA.sales.find(s=>s.id===saleId);
+  if(!sale) return;
+  editSaleState = {
+    saleId: sale.id,
+    clientId: sale.clientId,
+    date: sale.date,
+    time: sale.time,
+    items: sale.items.map(i=>({...i})),
+    discount: sale.discount,
+    taxRate: sale.taxRate,
+    paymentMethodId: sale.paymentMethodId
+  };
+  renderEditSaleModal();
+}
+
+function editSaleModalHtml(){
+  const subtotal = editSaleState.items.reduce((s,i)=>s+i.price,0);
+  const discountAmt = subtotal * (editSaleState.discount/100);
+  const afterDiscount = Math.max(0, subtotal - discountAmt);
+  const taxAmt = afterDiscount * (editSaleState.taxRate/100);
+  const total = afterDiscount + taxAmt;
+  return `
+    <div class="modal wide">
+      <div class="modal-header"><h3>Edit Sale</h3><button class="modal-close" data-close-modal>&#10005;</button></div>
+      <div class="modal-body">
+        <div class="field-row">
+          <div class="field"><label>Date</label><input type="date" id="esDate" value="${editSaleState.date}"></div>
+          <div class="field"><label>Time</label><input type="time" id="esTime" value="${editSaleState.time}"></div>
+        </div>
+        <div class="field">
+          <label>Client</label>
+          <select id="esClient">
+            <option value="">Walk-in / No client</option>
+            ${DATA.clients.sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}" ${editSaleState.clientId===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Line Items</label>
+          ${editSaleState.items.map((it,idx)=>`
+            <div class="field-row" style="align-items:center;margin-bottom:8px;">
+              <div class="field" style="margin-bottom:0;flex:2;"><input type="text" class="esItemName" data-idx="${idx}" value="${escapeHtml(it.name)}"></div>
+              <div class="field" style="max-width:100px;margin-bottom:0;"><input type="number" class="esItemPrice" data-idx="${idx}" step="0.01" value="${it.price}"></div>
+              <button class="icon-btn esRemoveItem" data-idx="${idx}" title="Remove">&#128465;</button>
+            </div>
+          `).join('') || `<div class="small-muted" style="margin-bottom:10px;">No items.</div>`}
+          <div class="field-row" style="align-items:flex-end;">
+            <div class="field">
+              <label>Add a service</label>
+              <select id="esAddServiceSelect">
+                <option value="">-- select --</option>
+                ${DATA.services.map(s=>`<option value="${s.id}">${escapeHtml(s.name)} (${fmtMoney(s.price)})</option>`).join('')}
+              </select>
+            </div>
+            <button class="btn secondary sm" id="esAddServiceBtn" style="margin-bottom:14px;">Add</button>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Discount (%)</label><input type="number" id="esDiscount" min="0" max="100" value="${editSaleState.discount}"></div>
+          <div class="field"><label>Tax Rate (%)</label><input type="number" id="esTaxRate" min="0" step="0.01" value="${editSaleState.taxRate}"></div>
+        </div>
+        <div class="field">
+          <label>Payment Method</label>
+          <select id="esPaymentMethod">
+            <option value="">-- select --</option>
+            ${DATA.paymentMethods.map(p=>`<option value="${p.id}" ${editSaleState.paymentMethodId===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="cart-total-row"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
+        <div class="cart-total-row"><span>Discount</span><span>-${fmtMoney(discountAmt)}</span></div>
+        <div class="cart-total-row"><span>Tax</span><span>${fmtMoney(taxAmt)}</span></div>
+        <div class="cart-total-row grand"><span>Total</span><span>${fmtMoney(total)}</span></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" data-close-modal>Cancel</button>
+        <button class="btn" id="saveEditSaleBtn">Save Changes</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderEditSaleModal(){
+  openModal(editSaleModalHtml());
+  attachEditSaleHandlers();
+}
+
+function attachEditSaleHandlers(){
+  document.getElementById('esDate').addEventListener('change', e=>{ editSaleState.date = e.target.value; });
+  document.getElementById('esTime').addEventListener('change', e=>{ editSaleState.time = e.target.value; });
+  document.getElementById('esClient').addEventListener('change', e=>{ editSaleState.clientId = e.target.value; });
+  document.getElementById('esDiscount').addEventListener('change', e=>{ editSaleState.discount = Number(e.target.value)||0; renderEditSaleModal(); });
+  document.getElementById('esTaxRate').addEventListener('change', e=>{ editSaleState.taxRate = Number(e.target.value)||0; renderEditSaleModal(); });
+  document.getElementById('esPaymentMethod').addEventListener('change', e=>{ editSaleState.paymentMethodId = e.target.value; });
+  document.querySelectorAll('.esItemName').forEach(inp=>inp.addEventListener('change', e=>{
+    editSaleState.items[Number(e.currentTarget.dataset.idx)].name = e.target.value;
+  }));
+  document.querySelectorAll('.esItemPrice').forEach(inp=>inp.addEventListener('change', e=>{
+    editSaleState.items[Number(e.currentTarget.dataset.idx)].price = Number(e.target.value)||0;
+    renderEditSaleModal();
+  }));
+  document.querySelectorAll('.esRemoveItem').forEach(btn=>btn.addEventListener('click', e=>{
+    editSaleState.items.splice(Number(e.currentTarget.dataset.idx),1);
+    renderEditSaleModal();
+  }));
+  document.getElementById('esAddServiceBtn').addEventListener('click', ()=>{
+    const sel = document.getElementById('esAddServiceSelect');
+    const sid = sel.value;
+    if(!sid) return;
+    const s = serviceById(sid);
+    editSaleState.items.push({serviceId:sid, name:s.name, price:s.price});
+    renderEditSaleModal();
+  });
+  document.getElementById('saveEditSaleBtn').addEventListener('click', saveEditedSale);
+}
+
+function saveEditedSale(){
+  const sale = DATA.sales.find(s=>s.id===editSaleState.saleId);
+  if(!sale) return;
+  if(editSaleState.items.length===0){ toast('A sale needs at least one item'); return; }
+  const subtotal = editSaleState.items.reduce((s,i)=>s+i.price,0);
+  const discountAmt = subtotal * (editSaleState.discount/100);
+  const afterDiscount = Math.max(0, subtotal - discountAmt);
+  const taxAmt = afterDiscount * (editSaleState.taxRate/100);
+  const total = afterDiscount + taxAmt;
+  const pm = paymentMethodById(editSaleState.paymentMethodId);
+  Object.assign(sale, {
+    clientId: editSaleState.clientId,
+    date: editSaleState.date,
+    time: editSaleState.time,
+    items: editSaleState.items,
+    discount: editSaleState.discount,
+    subtotal, discountAmt,
+    taxRate: editSaleState.taxRate, taxAmt,
+    total,
+    paymentMethodId: editSaleState.paymentMethodId,
+    paymentMethodName: pm ? pm.name : ''
+  });
+  saveData();
+  editSaleState = null;
+  closeModal();
+  render();
+  toast('Sale updated');
+}
+
+/* ---------------- Event Handling ---------------- */
+function attachPageHandlers(){
+  const main = document.getElementById('main');
+
+  main.querySelectorAll('[data-action]').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      const action = el.dataset.action;
+      const id = el.dataset.id;
+      handleAction(action, id, el);
+    });
+  });
+
+  const dateInput = document.getElementById('apptDateInput');
+  if(dateInput) dateInput.addEventListener('change', e=>{ apptFilterDate = e.target.value; render(); });
+
+  const search = document.getElementById('clientSearchInput');
+  if(search) search.addEventListener('input', e=>{ clientSearch = e.target.value; render(); });
+
+  const ckClient = document.getElementById('checkoutClient');
+  if(ckClient) ckClient.addEventListener('change', e=>{ checkoutState.clientId = e.target.value; });
+
+  const ckAppt = document.getElementById('checkoutAppt');
+  if(ckAppt) ckAppt.addEventListener('change', e=>{
+    checkoutState.linkedAppointmentId = e.target.value;
+    const appt = DATA.appointments.find(a=>a.id===e.target.value);
+    if(appt){
+      checkoutState.clientId = appt.clientId;
+      checkoutState.items = appt.serviceIds.map(sid=>{
+        const s = serviceById(sid);
+        return {serviceId:sid, name:s.name, price:s.price};
+      });
+    } else {
+      checkoutState.items = [];
+    }
+    render();
+  });
+
+  const discountInput = document.getElementById('discountInput');
+  if(discountInput) discountInput.addEventListener('input', e=>{
+    checkoutState.discount = Number(e.target.value)||0;
+    render();
+  });
+
+  const reportFromInput = document.getElementById('reportFromInput');
+  if(reportFromInput) reportFromInput.addEventListener('change', e=>{ reportFrom = e.target.value; render(); });
+  const reportToInput = document.getElementById('reportToInput');
+  if(reportToInput) reportToInput.addEventListener('change', e=>{ reportTo = e.target.value; render(); });
+
+  const paymentSelect = document.getElementById('paymentMethodSelect');
+  if(paymentSelect) paymentSelect.addEventListener('change', e=>{ checkoutState.paymentMethodId = e.target.value; });
+
+  const quickAddBtn = document.getElementById('quickAddBtn');
+  if(quickAddBtn) quickAddBtn.addEventListener('click', ()=>{
+    const name = document.getElementById('quickAddName').value.trim();
+    const price = Number(document.getElementById('quickAddPrice').value)||0;
+    if(!name){ toast('Enter a service name'); return; }
+    const newService = {id:uid(), name, price};
+    DATA.services.push(newService);
+    checkoutState.items.push({serviceId:newService.id, name:newService.name, price:newService.price});
+    saveData();
+    showQuickAdd = false;
+    render();
+    toast('Service added');
+  });
+
+  // Admin page handlers
+  const saveBizBtn = document.getElementById('saveBizBtn');
+  if(saveBizBtn) saveBizBtn.addEventListener('click', ()=>{
+    DATA.business.name = document.getElementById('bizName').value.trim() || 'My Salon';
+    DATA.business.address = document.getElementById('bizAddress').value.trim();
+    DATA.business.phone = document.getElementById('bizPhone').value.trim();
+    DATA.business.email = document.getElementById('bizEmail').value.trim();
+    DATA.business.taxRate = Number(document.getElementById('bizTax').value)||0;
+    DATA.business.receiptNote = document.getElementById('bizNote').value.trim();
+    saveData();
+    render();
+    toast('Business details saved');
+  });
+
+  const addPaymentBtn = document.getElementById('addPaymentBtn');
+  if(addPaymentBtn) addPaymentBtn.addEventListener('click', ()=>{
+    const name = document.getElementById('newPaymentName').value.trim();
+    const feePercent = Number(document.getElementById('newPaymentFee').value)||0;
+    if(!name){ toast('Enter a payment method name'); return; }
+    DATA.paymentMethods.push({id:uid(), name, feePercent});
+    saveData();
+    render();
+    toast('Payment method added');
+  });
+
+  const addServiceBtn = document.getElementById('addServiceBtn');
+  if(addServiceBtn) addServiceBtn.addEventListener('click', ()=>{
+    const name = document.getElementById('newServiceName').value.trim();
+    const price = Number(document.getElementById('newServicePrice').value)||0;
+    if(!name){ toast('Enter a service name'); return; }
+    DATA.services.push({id:uid(), name, price});
+    saveData();
+    render();
+    toast('Service added');
+  });
+
+  main.querySelectorAll('[data-payment-id]').forEach(row=>{
+    const id = row.dataset.paymentId;
+    row.querySelector('.pmName').addEventListener('change', e=>{
+      const p = paymentMethodById(id); if(p){ p.name = e.target.value; saveData(); }
+    });
+    row.querySelector('.pmFee').addEventListener('change', e=>{
+      const p = paymentMethodById(id); if(p){ p.feePercent = Number(e.target.value)||0; saveData(); }
+    });
+    row.querySelector('.removePmBtn').addEventListener('click', ()=>{
+      DATA.paymentMethods = DATA.paymentMethods.filter(p=>p.id!==id);
+      saveData();
+      render();
+    });
+  });
+
+  main.querySelectorAll('[data-service-id]').forEach(row=>{
+    const id = row.dataset.serviceId;
+    row.querySelector('.svcName').addEventListener('change', e=>{
+      const s = serviceById(id); if(s){ s.name = e.target.value; saveData(); }
+    });
+    row.querySelector('.svcPrice').addEventListener('change', e=>{
+      const s = serviceById(id); if(s){ s.price = Number(e.target.value)||0; saveData(); }
+    });
+    row.querySelector('.removeSvcBtn').addEventListener('click', ()=>{
+      DATA.services = DATA.services.filter(s=>s.id!==id);
+      saveData();
+      render();
+    });
+  });
+
+  const createFileBtn = document.getElementById('createFileBtn');
+  if(createFileBtn) createFileBtn.addEventListener('click', connectNewFile);
+
+  const openFileBtn = document.getElementById('openFileBtn');
+  if(openFileBtn) openFileBtn.addEventListener('click', connectExistingFile);
+
+  const disconnectFileBtn = document.getElementById('disconnectFileBtn');
+  if(disconnectFileBtn) disconnectFileBtn.addEventListener('click', disconnectFile);
+
+  const exportBtn = document.getElementById('exportBtn');
+  if(exportBtn) exportBtn.addEventListener('click', ()=>{
+    const blob = new Blob([JSON.stringify(DATA,null,2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'salon-backup-' + todayStr() + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  const importFile = document.getElementById('importFile');
+  if(importFile) importFile.addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev)=>{
+      try{
+        const imported = JSON.parse(ev.target.result);
+        if(!imported.clients || !imported.services){ toast('Invalid backup file'); return; }
+        if(!imported.business) imported.business = { name:'My Salon', address:'', phone:'', email:'', taxRate:0, receiptNote:'' };
+        if(!imported.paymentMethods) imported.paymentMethods = [{id:uid(),name:'Cash'}];
+        if(confirm('This will replace all current data with the backup. Continue?')){
+          DATA = imported;
+          saveData();
+          render();
+          toast('Backup imported');
+        }
+      }catch(err){ toast('Could not read file'); }
+    };
+    reader.readAsText(file);
+  });
+}
+
+function handleAction(action, id, el){
+  if(action==='new-appt') return openAppointmentModal();
+  if(action==='new-client') return openClientModal();
+  if(action==='go-checkout') return navigate('checkout');
+  if(action==='date-prev'){ apptFilterDate = shiftDate(apptFilterDate,-1); return render(); }
+  if(action==='date-next'){ apptFilterDate = shiftDate(apptFilterDate,1); return render(); }
+  if(action==='date-today'){ apptFilterDate = todayStr(); return render(); }
+  if(action==='complete-appt'){ const a=DATA.appointments.find(a=>a.id===id); a.status='completed'; saveData(); render(); return toast('Appointment marked complete'); }
+  if(action==='cancel-appt'){ const a=DATA.appointments.find(a=>a.id===id); a.status='cancelled'; saveData(); render(); return toast('Appointment cancelled'); }
+  if(action==='delete-appt'){ if(confirm('Delete this appointment?')){ DATA.appointments = DATA.appointments.filter(a=>a.id!==id); saveData(); render(); } return; }
+  if(action==='open-client'){ openClientId = id; return render(); }
+  if(action==='back-clients'){ openClientId = null; return render(); }
+  if(action==='edit-client'){ return openClientModal(DATA.clients.find(c=>c.id===id)); }
+  if(action==='delete-client'){
+    if(confirm('Delete this client and keep their history anonymized?')){
+      DATA.clients = DATA.clients.filter(c=>c.id!==id);
+      saveData(); openClientId=null; render(); toast('Client deleted');
+    }
+    return;
+  }
+  if(action==='toggle-service'){
+    const s = serviceById(id);
+    const idx = checkoutState.items.findIndex(i=>i.serviceId===id);
+    if(idx>=0) checkoutState.items.splice(idx,1);
+    else checkoutState.items.push({serviceId:id, name:s.name, price:s.price});
+    return render();
+  }
+  if(action==='toggle-quick-add'){ showQuickAdd = !showQuickAdd; return render(); }
+  if(action==='remove-item'){
+    checkoutState.items.splice(Number(el.dataset.idx),1);
+    return render();
+  }
+  if(action==='report-all'){ reportFrom=''; reportTo=''; return render(); }
+  if(action==='report-today'){ reportFrom=todayStr(); reportTo=todayStr(); return render(); }
+  if(action==='report-week'){ reportFrom=startOfWeek(todayStr()); reportTo=todayStr(); return render(); }
+  if(action==='report-month'){ reportFrom=startOfMonth(todayStr()); reportTo=todayStr(); return render(); }
+  if(action==='export-report-csv'){ exportReportCsv(); return; }
+  if(action==='edit-sale'){ openEditSaleModal(id); return; }
+  if(action==='cancel-sale'){
+    if(confirm('Cancel this sale? It will be kept for your records but excluded from totals.')){
+      const s = DATA.sales.find(s=>s.id===id);
+      if(s){ s.status='cancelled'; saveData(); render(); toast('Sale cancelled'); }
+    }
+    return;
+  }
+  if(action==='restore-sale'){
+    const s = DATA.sales.find(s=>s.id===id);
+    if(s){ s.status='completed'; saveData(); render(); toast('Sale restored'); }
+    return;
+  }
+  if(action==='view-receipt'){
+    const sale = DATA.sales.find(s=>s.id===id);
+    if(sale) openReceiptModal(sale);
+    return;
+  }
+  if(action==='complete-sale'){
+    if(!checkoutState.paymentMethodId){ toast('Please select a payment method'); return; }
+    const subtotal = checkoutState.items.reduce((s,i)=>s+i.price,0);
+    const discountAmt = subtotal * (checkoutState.discount/100);
+    const afterDiscount = Math.max(0, subtotal - discountAmt);
+    const taxRate = DATA.business.taxRate || 0;
+    const taxAmt = afterDiscount * (taxRate/100);
+    const total = afterDiscount + taxAmt;
+    const pm = paymentMethodById(checkoutState.paymentMethodId);
+    const sale = {
+      id: uid(),
+      receiptNumber: DATA.sales.length + 1,
+      clientId: checkoutState.clientId,
+      items: checkoutState.items,
+      discount: checkoutState.discount,
+      subtotal, discountAmt, taxRate, taxAmt, total,
+      paymentMethodId: checkoutState.paymentMethodId,
+      paymentMethodName: pm ? pm.name : '',
+      date: todayStr(),
+      time: new Date().toTimeString().slice(0,5),
+      status: 'completed'
+    };
+    DATA.sales.push(sale);
+    if(checkoutState.linkedAppointmentId){
+      const a = DATA.appointments.find(a=>a.id===checkoutState.linkedAppointmentId);
+      if(a) a.status='completed';
+    }
+    saveData();
+    checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'' };
+    render();
+    openReceiptModal(sale);
+    return;
+  }
+}
+
+function shiftDate(dateStr, days){
+  const d = new Date(dateStr+'T00:00:00');
+  d.setDate(d.getDate()+days);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+/* ---------------- Modals ---------------- */
+function openModal(html){
+  document.getElementById('modalRoot').innerHTML = `<div class="overlay" id="overlay">${html}</div>`;
+  document.getElementById('overlay').addEventListener('click', e=>{ if(e.target.id==='overlay') closeModal(); });
+  document.querySelectorAll('#modalRoot [data-close-modal]').forEach(btn=>btn.addEventListener('click', closeModal));
+}
+function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+function openClientModal(existing){
+  const isEdit = !!existing;
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>${isEdit?'Edit Client':'New Client'}</h3><button class="modal-close" data-close-modal>&#10005;</button></div>
+      <div class="modal-body">
+        <div class="field"><label>Name *</label><input type="text" id="cName" value="${isEdit?escapeHtml(existing.name):''}"></div>
+        <div class="field-row">
+          <div class="field"><label>Phone</label><input type="tel" id="cPhone" value="${isEdit?escapeHtml(existing.phone||''):''}"></div>
+          <div class="field"><label>Email</label><input type="email" id="cEmail" value="${isEdit?escapeHtml(existing.email||''):''}"></div>
+        </div>
+        <div class="field"><label>Notes (allergies, preferences, etc.)</label><textarea id="cNotes" rows="3">${isEdit?escapeHtml(existing.notes||''):''}</textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" data-close-modal>Cancel</button>
+        <button class="btn" id="saveClientBtn">${isEdit?'Save Changes':'Add Client'}</button>
+      </div>
+    </div>
+  `);
+  document.getElementById('saveClientBtn').addEventListener('click', ()=>{
+    const name = document.getElementById('cName').value.trim();
+    if(!name){ toast('Please enter a name'); return; }
+    const phone = document.getElementById('cPhone').value.trim();
+    const email = document.getElementById('cEmail').value.trim();
+    const notes = document.getElementById('cNotes').value.trim();
+    if(isEdit){
+      Object.assign(existing, {name, phone, email, notes});
+    } else {
+      DATA.clients.push({id:uid(), name, phone, email, notes, createdAt: todayStr()});
+    }
+    saveData();
+    closeModal();
+    render();
+    toast(isEdit?'Client updated':'Client added');
+  });
+}
+
+function openAppointmentModal(){
+  openModal(`
+    <div class="modal wide">
+      <div class="modal-header"><h3>New Appointment</h3><button class="modal-close" data-close-modal>&#10005;</button></div>
+      <div class="modal-body">
+        <div class="field">
+          <label>Client *</label>
+          <select id="aClient">
+            <option value="">-- select client --</option>
+            ${DATA.clients.sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Date *</label><input type="date" id="aDate" value="${apptFilterDate}"></div>
+          <div class="field"><label>Time *</label><input type="time" id="aTime" value="09:00"></div>
+        </div>
+        <div class="field">
+          <label>Services</label>
+          ${DATA.services.map(s=>`
+            <label style="display:flex;align-items:center;gap:8px;font-weight:400;color:var(--text);margin-bottom:6px;">
+              <input type="checkbox" class="aServiceChk" value="${s.id}" style="width:auto;"> ${escapeHtml(s.name)} &middot; ${fmtMoney(s.price)}
+            </label>
+          `).join('')}
+        </div>
+        <div class="field"><label>Notes</label><textarea id="aNotes" rows="2"></textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" data-close-modal>Cancel</button>
+        <button class="btn" id="saveApptBtn">Add Appointment</button>
+      </div>
+    </div>
+  `);
+  document.getElementById('saveApptBtn').addEventListener('click', ()=>{
+    const clientId = document.getElementById('aClient').value;
+    const date = document.getElementById('aDate').value;
+    const time = document.getElementById('aTime').value;
+    const notes = document.getElementById('aNotes').value.trim();
+    const serviceIds = Array.from(document.querySelectorAll('.aServiceChk:checked')).map(c=>c.value);
+    if(!clientId){ toast('Please select a client'); return; }
+    if(!date || !time){ toast('Please set date and time'); return; }
+    DATA.appointments.push({id:uid(), clientId, date, time, serviceIds, notes, status:'scheduled'});
+    saveData();
+    closeModal();
+    apptFilterDate = date;
+    navigate('appointments');
+    toast('Appointment added');
+  });
+}
+
+function openReceiptModal(sale){
+  const b = DATA.business;
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Receipt</h3><button class="modal-close" data-close-modal>&#10005;</button></div>
+      <div class="modal-body">
+        <div id="receiptPrintArea" class="receipt">
+          <h2>${escapeHtml(b.name)}</h2>
+          ${b.address ? `<div class="center">${escapeHtml(b.address)}</div>` : ''}
+          ${(b.phone||b.email) ? `<div class="center">${escapeHtml(b.phone||'')} ${b.phone&&b.email?' &middot; ':''} ${escapeHtml(b.email||'')}</div>` : ''}
+          <div class="divider"></div>
+          <div>Receipt #${sale.receiptNumber}</div>
+          <div>Date: ${fmtDate(sale.date)} ${sale.time}</div>
+          <div>Client: ${escapeHtml(clientName(sale.clientId))}</div>
+          <div>Payment: ${escapeHtml(sale.paymentMethodName || '-')}</div>
+          <div class="divider"></div>
+          <table>
+            ${sale.items.map(i=>`<tr><td>${escapeHtml(i.name)}</td><td class="rt">${fmtMoney(i.price)}</td></tr>`).join('')}
+          </table>
+          <div class="divider"></div>
+          <div class="totals-row"><span>Subtotal</span><span>${fmtMoney(sale.subtotal)}</span></div>
+          ${sale.discount>0 ? `<div class="totals-row"><span>Discount (${sale.discount}%)</span><span>-${fmtMoney(sale.discountAmt)}</span></div>` : ''}
+          <div class="totals-row"><span>Tax (${sale.taxRate}%)</span><span>${fmtMoney(sale.taxAmt)}</span></div>
+          <div class="grand-total"><span>Total</span><span>${fmtMoney(sale.total)}</span></div>
+          <div class="divider"></div>
+          <div class="center">${escapeHtml(b.receiptNote||'')}</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" data-close-modal>Close</button>
+        <button class="btn" id="printReceiptBtn">Print Receipt</button>
+      </div>
+    </div>
+  `);
+  document.getElementById('printReceiptBtn').addEventListener('click', ()=>window.print());
+}
+
+/* ---------------- Init ---------------- */
+document.getElementById('reconnectBtn').addEventListener('click', reconnectFile);
+// App start is driven by onAuthStateChanged above once the user signs in.
+</script>
+</body>
+</html>
