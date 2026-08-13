@@ -185,6 +185,7 @@
     <a class="nav-item" data-page="appointments"><span class="ic">&#128197;</span> Appointments</a>
     <a class="nav-item" data-page="clients"><span class="ic">&#128100;</span> Clients</a>
     <a class="nav-item" data-page="checkout"><span class="ic">&#128176;</span> Checkout</a>
+    <a class="nav-item" data-page="orders"><span class="ic">&#128203;</span> Orders</a>
     <a class="nav-item" data-page="reports"><span class="ic">&#128202;</span> Reports</a>
     <a class="nav-item" data-page="admin"><span class="ic">&#9881;</span> Admin</a>
     <div class="sidebar-footer">
@@ -299,6 +300,7 @@ function loadData(){
       ],
       appointments: [],
       sales: [],
+      nextReceiptNumber: 1,
       business: { name:'My Salon', address:'', phone:'', email:'', taxRate: 0, receiptNote:'Thank you for visiting!' },
       paymentMethods: [ {id:uid(), name:'Cash', feePercent:0}, {id:uid(), name:'Credit Card', feePercent:2.9} ]
     };
@@ -313,6 +315,12 @@ function loadData(){
   data.paymentMethods.forEach(p=>{ if(p.feePercent===undefined){ p.feePercent = 0; changed = true; } });
   data.sales.forEach((s,idx)=>{ if(!s.receiptNumber){ s.receiptNumber = idx+1; changed = true; } });
   data.sales.forEach(s=>{ if(!s.status){ s.status = 'completed'; changed = true; } });
+  data.sales.forEach(s=>{ if(s.taxExempt===undefined){ s.taxExempt = false; changed = true; } });
+  if(!data.nextReceiptNumber){
+    const maxExisting = data.sales.reduce((max,s)=>Math.max(max, s.receiptNumber||0), 0);
+    data.nextReceiptNumber = maxExisting + 1;
+    changed = true;
+  }
   if(changed) localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   return data;
 }
@@ -500,7 +508,7 @@ function escapeHtml(s){
 
 /* ---------------- Router ---------------- */
 let currentPage = 'dashboard';
-let checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'' };
+let checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'', taxExempt:false };
 
 function navigate(page){
   currentPage = page;
@@ -518,6 +526,7 @@ function render(){
   else if(currentPage==='appointments') main.innerHTML = renderAppointments();
   else if(currentPage==='clients') main.innerHTML = renderClients();
   else if(currentPage==='checkout') main.innerHTML = renderCheckout();
+  else if(currentPage==='orders') main.innerHTML = renderOrders();
   else if(currentPage==='reports') main.innerHTML = renderReports();
   else if(currentPage==='admin') main.innerHTML = renderAdmin();
   attachPageHandlers();
@@ -691,8 +700,21 @@ function renderCheckout(){
   const discountAmt = subtotal * (checkoutState.discount/100);
   const afterDiscount = Math.max(0, subtotal - discountAmt);
   const taxRate = DATA.business.taxRate || 0;
-  const taxAmt = afterDiscount * (taxRate/100);
+  const taxAmt = checkoutState.taxExempt ? 0 : afterDiscount * (taxRate/100);
   const total = afterDiscount + taxAmt;
+
+  if(DATA.clients.length===0){
+    return `
+      <div class="page-header">
+        <div><h2>Checkout</h2><div class="sub">Ring up a sale</div></div>
+      </div>
+      <div class="card empty">
+        <div class="big">&#128100;</div>
+        Add a client before ringing up a sale.
+        <div style="margin-top:16px;"><button class="btn" data-action="new-client">+ New Client</button></div>
+      </div>
+    `;
+  }
 
   return `
     <div class="page-header">
@@ -702,9 +724,9 @@ function renderCheckout(){
       <div>
         <div class="card" style="margin-bottom:16px;">
           <div class="field">
-            <label>Client</label>
+            <label>Client *</label>
             <select id="checkoutClient">
-              <option value="">Walk-in / No client</option>
+              <option value="">-- select client --</option>
               ${DATA.clients.sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}" ${checkoutState.clientId===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
             </select>
           </div>
@@ -754,6 +776,9 @@ function renderCheckout(){
             <label>Discount (%)</label>
             <input type="number" id="discountInput" min="0" max="100" value="${checkoutState.discount}">
           </div>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:400;color:var(--text);margin-bottom:14px;">
+            <input type="checkbox" id="taxExemptChk" style="width:auto;" ${checkoutState.taxExempt?'checked':''}> Tax exempt sale
+          </label>
           <div class="field">
             <label>Payment Method *</label>
             <select id="paymentMethodSelect">
@@ -763,7 +788,7 @@ function renderCheckout(){
           </div>
           <div class="cart-total-row"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
           <div class="cart-total-row"><span>Discount</span><span>-${fmtMoney(discountAmt)}</span></div>
-          <div class="cart-total-row"><span>Tax (${taxRate}%)</span><span>${fmtMoney(taxAmt)}</span></div>
+          <div class="cart-total-row"><span>Tax ${checkoutState.taxExempt?'(exempt)':'('+taxRate+'%)'}</span><span>${fmtMoney(taxAmt)}</span></div>
           <div class="cart-total-row grand"><span>Total</span><span>${fmtMoney(total)}</span></div>
           <button class="btn" style="width:100%;justify-content:center;margin-top:16px;" data-action="complete-sale" ${checkoutState.items.length===0?'disabled':''}>Complete Sale</button>
         </div>
@@ -870,6 +895,55 @@ function renderServicesEditList(){
   `).join('');
 }
 
+/* ---------------- Orders ---------------- */
+let orderSearch = '';
+
+function renderOrders(){
+  const q = orderSearch.toLowerCase();
+  const orders = DATA.sales
+    .filter(s=>{
+      if(!q) return true;
+      return clientName(s.clientId).toLowerCase().includes(q)
+        || String(s.receiptNumber).includes(q)
+        || (s.paymentMethodName||'').toLowerCase().includes(q)
+        || s.items.some(i=>i.name.toLowerCase().includes(q));
+    })
+    .sort((a,b)=>(b.date+b.time).localeCompare(a.date+a.time));
+
+  return `
+    <div class="page-header">
+      <div><h2>Orders</h2><div class="sub">${DATA.sales.length} total orders</div></div>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="orderSearchInput" placeholder="Search by client, receipt #, service, or payment method..." value="${escapeHtml(orderSearch)}">
+    </div>
+    <div class="card">
+      ${orders.length===0 ? `<div class="empty"><div class="big">&#128203;</div>No orders found.</div>` :
+      `<table><thead><tr><th>Date</th><th>Receipt #</th><th>Client</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>
+        ${orders.map(s=>`
+          <tr style="${s.status==='cancelled'?'opacity:0.5;':''}">
+            <td>${fmtDate(s.date)} ${s.time}</td>
+            <td>#${s.receiptNumber}</td>
+            <td>${escapeHtml(clientName(s.clientId))}</td>
+            <td>${s.items.map(i=>escapeHtml(i.name)).join(', ')}</td>
+            <td>${escapeHtml(s.paymentMethodName||'-')}</td>
+            <td>${fmtMoney(s.total)}</td>
+            <td><span class="badge ${s.status==='cancelled'?'cancelled':'completed'}">${s.status}</span></td>
+            <td style="text-align:right;white-space:nowrap;">
+              <button class="icon-btn" data-action="view-receipt" data-id="${s.id}" title="View receipt">&#128196;</button>
+              <button class="icon-btn" data-action="edit-sale" data-id="${s.id}" title="Edit">&#9998;</button>
+              ${s.status==='cancelled'
+                ? `<button class="icon-btn" data-action="restore-sale" data-id="${s.id}" title="Restore">&#8635;</button>`
+                : `<button class="icon-btn" data-action="cancel-sale" data-id="${s.id}" title="Cancel">&#10005;</button>`}
+              <button class="icon-btn" data-action="delete-sale" data-id="${s.id}" title="Delete permanently">&#128465;</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody></table>`}
+    </div>
+  `;
+}
+
 /* ---------------- Reports ---------------- */
 let reportFrom = '';
 let reportTo = '';
@@ -960,6 +1034,7 @@ function renderReports(){
               ${s.status==='cancelled'
                 ? `<button class="icon-btn" data-action="restore-sale" data-id="${s.id}" title="Restore">&#8635;</button>`
                 : `<button class="icon-btn" data-action="cancel-sale" data-id="${s.id}" title="Cancel">&#10005;</button>`}
+              <button class="icon-btn" data-action="delete-sale" data-id="${s.id}" title="Delete permanently">&#128465;</button>
             </td>
           </tr>
         `).join('')}
@@ -1043,6 +1118,7 @@ function openEditSaleModal(saleId){
     items: sale.items.map(i=>({...i})),
     discount: sale.discount,
     taxRate: sale.taxRate,
+    taxExempt: !!sale.taxExempt,
     paymentMethodId: sale.paymentMethodId
   };
   renderEditSaleModal();
@@ -1052,7 +1128,7 @@ function editSaleModalHtml(){
   const subtotal = editSaleState.items.reduce((s,i)=>s+i.price,0);
   const discountAmt = subtotal * (editSaleState.discount/100);
   const afterDiscount = Math.max(0, subtotal - discountAmt);
-  const taxAmt = afterDiscount * (editSaleState.taxRate/100);
+  const taxAmt = editSaleState.taxExempt ? 0 : afterDiscount * (editSaleState.taxRate/100);
   const total = afterDiscount + taxAmt;
   return `
     <div class="modal wide">
@@ -1063,9 +1139,9 @@ function editSaleModalHtml(){
           <div class="field"><label>Time</label><input type="time" id="esTime" value="${editSaleState.time}"></div>
         </div>
         <div class="field">
-          <label>Client</label>
+          <label>Client *</label>
           <select id="esClient">
-            <option value="">Walk-in / No client</option>
+            <option value="">-- select client --</option>
             ${DATA.clients.sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}" ${editSaleState.clientId===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
           </select>
         </div>
@@ -1093,6 +1169,9 @@ function editSaleModalHtml(){
           <div class="field"><label>Discount (%)</label><input type="number" id="esDiscount" min="0" max="100" value="${editSaleState.discount}"></div>
           <div class="field"><label>Tax Rate (%)</label><input type="number" id="esTaxRate" min="0" step="0.01" value="${editSaleState.taxRate}"></div>
         </div>
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400;color:var(--text);margin-bottom:14px;">
+          <input type="checkbox" id="esTaxExemptChk" style="width:auto;" ${editSaleState.taxExempt?'checked':''}> Tax exempt sale
+        </label>
         <div class="field">
           <label>Payment Method</label>
           <select id="esPaymentMethod">
@@ -1102,7 +1181,7 @@ function editSaleModalHtml(){
         </div>
         <div class="cart-total-row"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
         <div class="cart-total-row"><span>Discount</span><span>-${fmtMoney(discountAmt)}</span></div>
-        <div class="cart-total-row"><span>Tax</span><span>${fmtMoney(taxAmt)}</span></div>
+        <div class="cart-total-row"><span>Tax ${editSaleState.taxExempt?'(exempt)':''}</span><span>${fmtMoney(taxAmt)}</span></div>
         <div class="cart-total-row grand"><span>Total</span><span>${fmtMoney(total)}</span></div>
       </div>
       <div class="modal-footer">
@@ -1125,6 +1204,7 @@ function attachEditSaleHandlers(){
   document.getElementById('esDiscount').addEventListener('change', e=>{ editSaleState.discount = Number(e.target.value)||0; renderEditSaleModal(); });
   document.getElementById('esTaxRate').addEventListener('change', e=>{ editSaleState.taxRate = Number(e.target.value)||0; renderEditSaleModal(); });
   document.getElementById('esPaymentMethod').addEventListener('change', e=>{ editSaleState.paymentMethodId = e.target.value; });
+  document.getElementById('esTaxExemptChk').addEventListener('change', e=>{ editSaleState.taxExempt = e.target.checked; renderEditSaleModal(); });
   document.querySelectorAll('.esItemName').forEach(inp=>inp.addEventListener('change', e=>{
     editSaleState.items[Number(e.currentTarget.dataset.idx)].name = e.target.value;
   }));
@@ -1150,11 +1230,12 @@ function attachEditSaleHandlers(){
 function saveEditedSale(){
   const sale = DATA.sales.find(s=>s.id===editSaleState.saleId);
   if(!sale) return;
+  if(!editSaleState.clientId){ toast('Please select a client'); return; }
   if(editSaleState.items.length===0){ toast('A sale needs at least one item'); return; }
   const subtotal = editSaleState.items.reduce((s,i)=>s+i.price,0);
   const discountAmt = subtotal * (editSaleState.discount/100);
   const afterDiscount = Math.max(0, subtotal - discountAmt);
-  const taxAmt = afterDiscount * (editSaleState.taxRate/100);
+  const taxAmt = editSaleState.taxExempt ? 0 : afterDiscount * (editSaleState.taxRate/100);
   const total = afterDiscount + taxAmt;
   const pm = paymentMethodById(editSaleState.paymentMethodId);
   Object.assign(sale, {
@@ -1165,6 +1246,7 @@ function saveEditedSale(){
     discount: editSaleState.discount,
     subtotal, discountAmt,
     taxRate: editSaleState.taxRate, taxAmt,
+    taxExempt: !!editSaleState.taxExempt,
     total,
     paymentMethodId: editSaleState.paymentMethodId,
     paymentMethodName: pm ? pm.name : ''
@@ -1194,6 +1276,9 @@ function attachPageHandlers(){
   const search = document.getElementById('clientSearchInput');
   if(search) search.addEventListener('input', e=>{ clientSearch = e.target.value; render(); });
 
+  const orderSearchEl = document.getElementById('orderSearchInput');
+  if(orderSearchEl) orderSearchEl.addEventListener('input', e=>{ orderSearch = e.target.value; render(); });
+
   const ckClient = document.getElementById('checkoutClient');
   if(ckClient) ckClient.addEventListener('change', e=>{ checkoutState.clientId = e.target.value; });
 
@@ -1216,6 +1301,12 @@ function attachPageHandlers(){
   const discountInput = document.getElementById('discountInput');
   if(discountInput) discountInput.addEventListener('input', e=>{
     checkoutState.discount = Number(e.target.value)||0;
+    render();
+  });
+
+  const taxExemptChk = document.getElementById('taxExemptChk');
+  if(taxExemptChk) taxExemptChk.addEventListener('change', e=>{
+    checkoutState.taxExempt = e.target.checked;
     render();
   });
 
@@ -1400,27 +1491,40 @@ function handleAction(action, id, el){
     if(s){ s.status='completed'; saveData(); render(); toast('Sale restored'); }
     return;
   }
+  if(action==='delete-sale'){
+    if(confirm('Permanently delete this sale? This cannot be undone.')){
+      DATA.sales = DATA.sales.filter(s=>s.id!==id);
+      saveData();
+      render();
+      toast('Sale deleted');
+    }
+    return;
+  }
   if(action==='view-receipt'){
     const sale = DATA.sales.find(s=>s.id===id);
     if(sale) openReceiptModal(sale);
     return;
   }
   if(action==='complete-sale'){
+    if(!checkoutState.clientId){ toast('Please select a client'); return; }
     if(!checkoutState.paymentMethodId){ toast('Please select a payment method'); return; }
     const subtotal = checkoutState.items.reduce((s,i)=>s+i.price,0);
     const discountAmt = subtotal * (checkoutState.discount/100);
     const afterDiscount = Math.max(0, subtotal - discountAmt);
     const taxRate = DATA.business.taxRate || 0;
-    const taxAmt = afterDiscount * (taxRate/100);
+    const taxAmt = checkoutState.taxExempt ? 0 : afterDiscount * (taxRate/100);
     const total = afterDiscount + taxAmt;
     const pm = paymentMethodById(checkoutState.paymentMethodId);
+    const receiptNumber = DATA.nextReceiptNumber || (DATA.sales.length + 1);
+    DATA.nextReceiptNumber = receiptNumber + 1;
     const sale = {
       id: uid(),
-      receiptNumber: DATA.sales.length + 1,
+      receiptNumber,
       clientId: checkoutState.clientId,
       items: checkoutState.items,
       discount: checkoutState.discount,
       subtotal, discountAmt, taxRate, taxAmt, total,
+      taxExempt: !!checkoutState.taxExempt,
       paymentMethodId: checkoutState.paymentMethodId,
       paymentMethodName: pm ? pm.name : '',
       date: todayStr(),
@@ -1433,7 +1537,7 @@ function handleAction(action, id, el){
       if(a) a.status='completed';
     }
     saveData();
-    checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'' };
+    checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'', taxExempt:false };
     render();
     openReceiptModal(sale);
     return;
@@ -1562,7 +1666,7 @@ function openReceiptModal(sale){
           <div class="divider"></div>
           <div class="totals-row"><span>Subtotal</span><span>${fmtMoney(sale.subtotal)}</span></div>
           ${sale.discount>0 ? `<div class="totals-row"><span>Discount (${sale.discount}%)</span><span>-${fmtMoney(sale.discountAmt)}</span></div>` : ''}
-          <div class="totals-row"><span>Tax (${sale.taxRate}%)</span><span>${fmtMoney(sale.taxAmt)}</span></div>
+          <div class="totals-row"><span>Tax ${sale.taxExempt ? '(exempt)' : '('+sale.taxRate+'%)'}</span><span>${fmtMoney(sale.taxAmt)}</span></div>
           <div class="grand-total"><span>Total</span><span>${fmtMoney(sale.total)}</span></div>
           <div class="divider"></div>
           <div class="center">${escapeHtml(b.receiptNote||'')}</div>
