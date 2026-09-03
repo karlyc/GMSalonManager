@@ -523,7 +523,7 @@ function escapeHtml(s){
 
 /* ---------------- Router ---------------- */
 let currentPage = 'dashboard';
-let checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'' };
+let checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'', date: todayStr() };
 
 function navigate(page){
   currentPage = page;
@@ -740,6 +740,10 @@ function renderCheckout(){
               <option value="">-- select client --</option>
               ${DATA.clients.sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}" ${checkoutState.clientId===c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('')}
             </select>
+          </div>
+          <div class="field">
+            <label>Receipt Date</label>
+            <input type="date" id="checkoutDate" value="${checkoutState.date}">
           </div>
           ${todaysAppts.length>0 ? `
           <div class="field">
@@ -1293,6 +1297,9 @@ function attachPageHandlers(){
   const ckClient = document.getElementById('checkoutClient');
   if(ckClient) ckClient.addEventListener('change', e=>{ checkoutState.clientId = e.target.value; });
 
+  const ckDate = document.getElementById('checkoutDate');
+  if(ckDate) ckDate.addEventListener('change', e=>{ checkoutState.date = e.target.value || todayStr(); });
+
   const ckAppt = document.getElementById('checkoutAppt');
   if(ckAppt) ckAppt.addEventListener('change', e=>{
     checkoutState.linkedAppointmentId = e.target.value;
@@ -1535,7 +1542,7 @@ function handleAction(action, id, el){
       taxAmt: totals.taxAmt, total: totals.total,
       paymentMethodId: checkoutState.paymentMethodId,
       paymentMethodName: pm ? pm.name : '',
-      date: todayStr(),
+      date: checkoutState.date || todayStr(),
       time: new Date().toTimeString().slice(0,5),
       status: 'completed'
     };
@@ -1545,7 +1552,7 @@ function handleAction(action, id, el){
       if(a) a.status='completed';
     }
     saveData();
-    checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'' };
+    checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'', date: todayStr() };
     render();
     openReceiptModal(sale);
     return;
