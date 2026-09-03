@@ -315,7 +315,11 @@ function loadData(){
   data.paymentMethods.forEach(p=>{ if(p.feePercent===undefined){ p.feePercent = 0; changed = true; } });
   data.sales.forEach((s,idx)=>{ if(!s.receiptNumber){ s.receiptNumber = idx+1; changed = true; } });
   data.sales.forEach(s=>{ if(!s.status){ s.status = 'completed'; changed = true; } });
-  data.sales.forEach(s=>{ if(s.taxExempt===undefined){ s.taxExempt = false; changed = true; } });
+  data.sales.forEach(s=>{
+    if(s.items){
+      s.items.forEach(it=>{ if(it.exempt===undefined){ it.exempt = !!s.taxExempt; changed = true; } });
+    }
+  });
   if(!data.nextReceiptNumber){
     const maxExisting = data.sales.reduce((max,s)=>Math.max(max, s.receiptNumber||0), 0);
     data.nextReceiptNumber = maxExisting + 1;
@@ -484,6 +488,17 @@ async function tryAutoReconnect(){
 
 /* ---------------- Helpers ---------------- */
 function fmtMoney(n){ return '$' + Number(n).toFixed(2); }
+function computeSaleTotals(items, discountPct, taxRatePct){
+  const subtotal = items.reduce((s,i)=>s+i.price,0);
+  const discountAmt = subtotal * ((discountPct||0)/100);
+  const taxableSubtotal = items.filter(i=>!i.exempt).reduce((s,i)=>s+i.price,0);
+  const nonTaxableSubtotal = subtotal - taxableSubtotal;
+  const taxableDiscountShare = subtotal>0 ? discountAmt * (taxableSubtotal/subtotal) : 0;
+  const taxableAfterDiscount = Math.max(0, taxableSubtotal - taxableDiscountShare);
+  const taxAmt = taxableAfterDiscount * ((taxRatePct||0)/100);
+  const total = Math.max(0, subtotal - discountAmt) + taxAmt;
+  return { subtotal, discountAmt, taxableSubtotal, nonTaxableSubtotal, taxAmt, total };
+}
 function fmtDate(d){
   const dt = new Date(d + 'T00:00:00');
   return dt.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric', year:'numeric'});
@@ -508,7 +523,7 @@ function escapeHtml(s){
 
 /* ---------------- Router ---------------- */
 let currentPage = 'dashboard';
-let checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'', taxExempt:false };
+let checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'' };
 
 function navigate(page){
   currentPage = page;
@@ -696,12 +711,8 @@ let showQuickAdd = false;
 
 function renderCheckout(){
   const todaysAppts = DATA.appointments.filter(a=>a.date===todayStr() && a.status==='scheduled');
-  const subtotal = checkoutState.items.reduce((s,i)=>s+i.price,0);
-  const discountAmt = subtotal * (checkoutState.discount/100);
-  const afterDiscount = Math.max(0, subtotal - discountAmt);
   const taxRate = DATA.business.taxRate || 0;
-  const taxAmt = checkoutState.taxExempt ? 0 : afterDiscount * (taxRate/100);
-  const total = afterDiscount + taxAmt;
+  const totals = computeSaleTotals(checkoutState.items, checkoutState.discount, taxRate);
 
   if(DATA.clients.length===0){
     return `
@@ -764,21 +775,24 @@ function renderCheckout(){
       </div>
       <div class="cart">
         <div class="card">
-          <h3 style="margin-bottom:14px;font-size:15px;">Cart</h3>
+          <h3 style="margin-bottom:4px;font-size:15px;">Cart</h3>
+          <p class="small-muted" style="margin-bottom:12px;">Uncheck "Taxable" on any item that shouldn't be taxed.</p>
           ${checkoutState.items.length===0 ? `<div class="small-muted">No services selected.</div>` :
             checkoutState.items.map((i,idx)=>`
-              <div class="cart-item">
+              <div class="cart-item" style="align-items:center;">
                 <span>${escapeHtml(i.name)}</span>
-                <span>${fmtMoney(i.price)} <button data-action="remove-item" data-idx="${idx}">&#10005;</button></span>
+                <span style="display:flex;align-items:center;gap:10px;">
+                  <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);font-weight:500;">
+                    <input type="checkbox" class="itemTaxableChk" data-idx="${idx}" style="width:auto;" ${i.exempt?'':'checked'}> Taxable
+                  </label>
+                  ${fmtMoney(i.price)} <button data-action="remove-item" data-idx="${idx}">&#10005;</button>
+                </span>
               </div>
             `).join('')}
           <div class="field" style="margin-top:16px;">
             <label>Discount (%)</label>
             <input type="number" id="discountInput" min="0" max="100" value="${checkoutState.discount}">
           </div>
-          <label style="display:flex;align-items:center;gap:8px;font-weight:400;color:var(--text);margin-bottom:14px;">
-            <input type="checkbox" id="taxExemptChk" style="width:auto;" ${checkoutState.taxExempt?'checked':''}> Tax exempt sale
-          </label>
           <div class="field">
             <label>Payment Method *</label>
             <select id="paymentMethodSelect">
@@ -786,10 +800,10 @@ function renderCheckout(){
               ${DATA.paymentMethods.map(p=>`<option value="${p.id}" ${checkoutState.paymentMethodId===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
             </select>
           </div>
-          <div class="cart-total-row"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
-          <div class="cart-total-row"><span>Discount</span><span>-${fmtMoney(discountAmt)}</span></div>
-          <div class="cart-total-row"><span>Tax ${checkoutState.taxExempt?'(exempt)':'('+taxRate+'%)'}</span><span>${fmtMoney(taxAmt)}</span></div>
-          <div class="cart-total-row grand"><span>Total</span><span>${fmtMoney(total)}</span></div>
+          <div class="cart-total-row"><span>Subtotal</span><span>${fmtMoney(totals.subtotal)}</span></div>
+          <div class="cart-total-row"><span>Discount</span><span>-${fmtMoney(totals.discountAmt)}</span></div>
+          <div class="cart-total-row"><span>Tax (${taxRate}% on ${fmtMoney(totals.taxableSubtotal)} taxable)</span><span>${fmtMoney(totals.taxAmt)}</span></div>
+          <div class="cart-total-row grand"><span>Total</span><span>${fmtMoney(totals.total)}</span></div>
           <button class="btn" style="width:100%;justify-content:center;margin-top:16px;" data-action="complete-sale" ${checkoutState.items.length===0?'disabled':''}>Complete Sale</button>
         </div>
       </div>
@@ -1115,21 +1129,17 @@ function openEditSaleModal(saleId){
     clientId: sale.clientId,
     date: sale.date,
     time: sale.time,
-    items: sale.items.map(i=>({...i})),
+    items: sale.items.map(i=>({...i, exempt: !!i.exempt})),
     discount: sale.discount,
     taxRate: sale.taxRate,
-    taxExempt: !!sale.taxExempt,
     paymentMethodId: sale.paymentMethodId
   };
   renderEditSaleModal();
 }
 
 function editSaleModalHtml(){
-  const subtotal = editSaleState.items.reduce((s,i)=>s+i.price,0);
-  const discountAmt = subtotal * (editSaleState.discount/100);
-  const afterDiscount = Math.max(0, subtotal - discountAmt);
-  const taxAmt = editSaleState.taxExempt ? 0 : afterDiscount * (editSaleState.taxRate/100);
-  const total = afterDiscount + taxAmt;
+  const taxRate = editSaleState.taxRate;
+  const totals = computeSaleTotals(editSaleState.items, editSaleState.discount, taxRate);
   return `
     <div class="modal wide">
       <div class="modal-header"><h3>Edit Sale</h3><button class="modal-close" data-close-modal>&#10005;</button></div>
@@ -1147,10 +1157,14 @@ function editSaleModalHtml(){
         </div>
         <div class="field">
           <label>Line Items</label>
+          <p class="small-muted" style="margin-top:-4px;margin-bottom:8px;">Uncheck "Taxable" on any item that shouldn't be taxed.</p>
           ${editSaleState.items.map((it,idx)=>`
             <div class="field-row" style="align-items:center;margin-bottom:8px;">
               <div class="field" style="margin-bottom:0;flex:2;"><input type="text" class="esItemName" data-idx="${idx}" value="${escapeHtml(it.name)}"></div>
               <div class="field" style="max-width:100px;margin-bottom:0;"><input type="number" class="esItemPrice" data-idx="${idx}" step="0.01" value="${it.price}"></div>
+              <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);font-weight:500;white-space:nowrap;">
+                <input type="checkbox" class="esItemTaxableChk" data-idx="${idx}" style="width:auto;" ${it.exempt?'':'checked'}> Taxable
+              </label>
               <button class="icon-btn esRemoveItem" data-idx="${idx}" title="Remove">&#128465;</button>
             </div>
           `).join('') || `<div class="small-muted" style="margin-bottom:10px;">No items.</div>`}
@@ -1169,9 +1183,6 @@ function editSaleModalHtml(){
           <div class="field"><label>Discount (%)</label><input type="number" id="esDiscount" min="0" max="100" value="${editSaleState.discount}"></div>
           <div class="field"><label>Tax Rate (%)</label><input type="number" id="esTaxRate" min="0" step="0.01" value="${editSaleState.taxRate}"></div>
         </div>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:400;color:var(--text);margin-bottom:14px;">
-          <input type="checkbox" id="esTaxExemptChk" style="width:auto;" ${editSaleState.taxExempt?'checked':''}> Tax exempt sale
-        </label>
         <div class="field">
           <label>Payment Method</label>
           <select id="esPaymentMethod">
@@ -1179,10 +1190,10 @@ function editSaleModalHtml(){
             ${DATA.paymentMethods.map(p=>`<option value="${p.id}" ${editSaleState.paymentMethodId===p.id?'selected':''}>${escapeHtml(p.name)}</option>`).join('')}
           </select>
         </div>
-        <div class="cart-total-row"><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
-        <div class="cart-total-row"><span>Discount</span><span>-${fmtMoney(discountAmt)}</span></div>
-        <div class="cart-total-row"><span>Tax ${editSaleState.taxExempt?'(exempt)':''}</span><span>${fmtMoney(taxAmt)}</span></div>
-        <div class="cart-total-row grand"><span>Total</span><span>${fmtMoney(total)}</span></div>
+        <div class="cart-total-row"><span>Subtotal</span><span>${fmtMoney(totals.subtotal)}</span></div>
+        <div class="cart-total-row"><span>Discount</span><span>-${fmtMoney(totals.discountAmt)}</span></div>
+        <div class="cart-total-row"><span>Tax (${taxRate}% on ${fmtMoney(totals.taxableSubtotal)} taxable)</span><span>${fmtMoney(totals.taxAmt)}</span></div>
+        <div class="cart-total-row grand"><span>Total</span><span>${fmtMoney(totals.total)}</span></div>
       </div>
       <div class="modal-footer">
         <button class="btn secondary" data-close-modal>Cancel</button>
@@ -1204,12 +1215,15 @@ function attachEditSaleHandlers(){
   document.getElementById('esDiscount').addEventListener('change', e=>{ editSaleState.discount = Number(e.target.value)||0; renderEditSaleModal(); });
   document.getElementById('esTaxRate').addEventListener('change', e=>{ editSaleState.taxRate = Number(e.target.value)||0; renderEditSaleModal(); });
   document.getElementById('esPaymentMethod').addEventListener('change', e=>{ editSaleState.paymentMethodId = e.target.value; });
-  document.getElementById('esTaxExemptChk').addEventListener('change', e=>{ editSaleState.taxExempt = e.target.checked; renderEditSaleModal(); });
   document.querySelectorAll('.esItemName').forEach(inp=>inp.addEventListener('change', e=>{
     editSaleState.items[Number(e.currentTarget.dataset.idx)].name = e.target.value;
   }));
   document.querySelectorAll('.esItemPrice').forEach(inp=>inp.addEventListener('change', e=>{
     editSaleState.items[Number(e.currentTarget.dataset.idx)].price = Number(e.target.value)||0;
+    renderEditSaleModal();
+  }));
+  document.querySelectorAll('.esItemTaxableChk').forEach(chk=>chk.addEventListener('change', e=>{
+    editSaleState.items[Number(e.currentTarget.dataset.idx)].exempt = !e.target.checked;
     renderEditSaleModal();
   }));
   document.querySelectorAll('.esRemoveItem').forEach(btn=>btn.addEventListener('click', e=>{
@@ -1221,7 +1235,7 @@ function attachEditSaleHandlers(){
     const sid = sel.value;
     if(!sid) return;
     const s = serviceById(sid);
-    editSaleState.items.push({serviceId:sid, name:s.name, price:s.price});
+    editSaleState.items.push({serviceId:sid, name:s.name, price:s.price, exempt:false});
     renderEditSaleModal();
   });
   document.getElementById('saveEditSaleBtn').addEventListener('click', saveEditedSale);
@@ -1232,11 +1246,7 @@ function saveEditedSale(){
   if(!sale) return;
   if(!editSaleState.clientId){ toast('Please select a client'); return; }
   if(editSaleState.items.length===0){ toast('A sale needs at least one item'); return; }
-  const subtotal = editSaleState.items.reduce((s,i)=>s+i.price,0);
-  const discountAmt = subtotal * (editSaleState.discount/100);
-  const afterDiscount = Math.max(0, subtotal - discountAmt);
-  const taxAmt = editSaleState.taxExempt ? 0 : afterDiscount * (editSaleState.taxRate/100);
-  const total = afterDiscount + taxAmt;
+  const totals = computeSaleTotals(editSaleState.items, editSaleState.discount, editSaleState.taxRate);
   const pm = paymentMethodById(editSaleState.paymentMethodId);
   Object.assign(sale, {
     clientId: editSaleState.clientId,
@@ -1244,10 +1254,11 @@ function saveEditedSale(){
     time: editSaleState.time,
     items: editSaleState.items,
     discount: editSaleState.discount,
-    subtotal, discountAmt,
-    taxRate: editSaleState.taxRate, taxAmt,
-    taxExempt: !!editSaleState.taxExempt,
-    total,
+    subtotal: totals.subtotal, discountAmt: totals.discountAmt,
+    taxRate: editSaleState.taxRate,
+    taxableSubtotal: totals.taxableSubtotal, nonTaxableSubtotal: totals.nonTaxableSubtotal,
+    taxAmt: totals.taxAmt,
+    total: totals.total,
     paymentMethodId: editSaleState.paymentMethodId,
     paymentMethodName: pm ? pm.name : ''
   });
@@ -1304,11 +1315,11 @@ function attachPageHandlers(){
     render();
   });
 
-  const taxExemptChk = document.getElementById('taxExemptChk');
-  if(taxExemptChk) taxExemptChk.addEventListener('change', e=>{
-    checkoutState.taxExempt = e.target.checked;
+  main.querySelectorAll('.itemTaxableChk').forEach(chk=>chk.addEventListener('change', e=>{
+    const idx = Number(e.currentTarget.dataset.idx);
+    checkoutState.items[idx].exempt = !e.target.checked;
     render();
-  });
+  }));
 
   const reportFromInput = document.getElementById('reportFromInput');
   if(reportFromInput) reportFromInput.addEventListener('change', e=>{ reportFrom = e.target.value; render(); });
@@ -1325,7 +1336,7 @@ function attachPageHandlers(){
     if(!name){ toast('Enter a service name'); return; }
     const newService = {id:uid(), name, price};
     DATA.services.push(newService);
-    checkoutState.items.push({serviceId:newService.id, name:newService.name, price:newService.price});
+    checkoutState.items.push({serviceId:newService.id, name:newService.name, price:newService.price, exempt:false});
     saveData();
     showQuickAdd = false;
     render();
@@ -1465,7 +1476,7 @@ function handleAction(action, id, el){
     const s = serviceById(id);
     const idx = checkoutState.items.findIndex(i=>i.serviceId===id);
     if(idx>=0) checkoutState.items.splice(idx,1);
-    else checkoutState.items.push({serviceId:id, name:s.name, price:s.price});
+    else checkoutState.items.push({serviceId:id, name:s.name, price:s.price, exempt:false});
     return render();
   }
   if(action==='toggle-quick-add'){ showQuickAdd = !showQuickAdd; return render(); }
@@ -1508,12 +1519,8 @@ function handleAction(action, id, el){
   if(action==='complete-sale'){
     if(!checkoutState.clientId){ toast('Please select a client'); return; }
     if(!checkoutState.paymentMethodId){ toast('Please select a payment method'); return; }
-    const subtotal = checkoutState.items.reduce((s,i)=>s+i.price,0);
-    const discountAmt = subtotal * (checkoutState.discount/100);
-    const afterDiscount = Math.max(0, subtotal - discountAmt);
     const taxRate = DATA.business.taxRate || 0;
-    const taxAmt = checkoutState.taxExempt ? 0 : afterDiscount * (taxRate/100);
-    const total = afterDiscount + taxAmt;
+    const totals = computeSaleTotals(checkoutState.items, checkoutState.discount, taxRate);
     const pm = paymentMethodById(checkoutState.paymentMethodId);
     const receiptNumber = DATA.nextReceiptNumber || (DATA.sales.length + 1);
     DATA.nextReceiptNumber = receiptNumber + 1;
@@ -1523,8 +1530,9 @@ function handleAction(action, id, el){
       clientId: checkoutState.clientId,
       items: checkoutState.items,
       discount: checkoutState.discount,
-      subtotal, discountAmt, taxRate, taxAmt, total,
-      taxExempt: !!checkoutState.taxExempt,
+      subtotal: totals.subtotal, discountAmt: totals.discountAmt, taxRate,
+      taxableSubtotal: totals.taxableSubtotal, nonTaxableSubtotal: totals.nonTaxableSubtotal,
+      taxAmt: totals.taxAmt, total: totals.total,
       paymentMethodId: checkoutState.paymentMethodId,
       paymentMethodName: pm ? pm.name : '',
       date: todayStr(),
@@ -1537,7 +1545,7 @@ function handleAction(action, id, el){
       if(a) a.status='completed';
     }
     saveData();
-    checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'', taxExempt:false };
+    checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'' };
     render();
     openReceiptModal(sale);
     return;
@@ -1661,12 +1669,12 @@ function openReceiptModal(sale){
           <div>Payment: ${escapeHtml(sale.paymentMethodName || '-')}</div>
           <div class="divider"></div>
           <table>
-            ${sale.items.map(i=>`<tr><td>${escapeHtml(i.name)}</td><td class="rt">${fmtMoney(i.price)}</td></tr>`).join('')}
+            ${sale.items.map(i=>`<tr><td>${escapeHtml(i.name)}${i.exempt?' <span class="small-muted">(exempt)</span>':''}</td><td class="rt">${fmtMoney(i.price)}</td></tr>`).join('')}
           </table>
           <div class="divider"></div>
           <div class="totals-row"><span>Subtotal</span><span>${fmtMoney(sale.subtotal)}</span></div>
           ${sale.discount>0 ? `<div class="totals-row"><span>Discount (${sale.discount}%)</span><span>-${fmtMoney(sale.discountAmt)}</span></div>` : ''}
-          <div class="totals-row"><span>Tax ${sale.taxExempt ? '(exempt)' : '('+sale.taxRate+'%)'}</span><span>${fmtMoney(sale.taxAmt)}</span></div>
+          <div class="totals-row"><span>Tax (${sale.taxRate}%${(sale.items && sale.items.some(i=>i.exempt)) ? ', some items exempt' : ''})</span><span>${fmtMoney(sale.taxAmt)}</span></div>
           <div class="grand-total"><span>Total</span><span>${fmtMoney(sale.total)}</span></div>
           <div class="divider"></div>
           <div class="center">${escapeHtml(b.receiptNote||'')}</div>
