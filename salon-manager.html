@@ -320,6 +320,7 @@ function loadData(){
       s.items.forEach(it=>{ if(it.exempt===undefined){ it.exempt = !!s.taxExempt; changed = true; } });
     }
   });
+  data.sales.forEach(s=>{ if(s.tip===undefined){ s.tip = 0; changed = true; } });
   if(!data.nextReceiptNumber){
     const maxExisting = data.sales.reduce((max,s)=>Math.max(max, s.receiptNumber||0), 0);
     data.nextReceiptNumber = maxExisting + 1;
@@ -488,7 +489,7 @@ async function tryAutoReconnect(){
 
 /* ---------------- Helpers ---------------- */
 function fmtMoney(n){ return '$' + Number(n).toFixed(2); }
-function computeSaleTotals(items, discountPct, taxRatePct){
+function computeSaleTotals(items, discountPct, taxRatePct, tip){
   const subtotal = items.reduce((s,i)=>s+i.price,0);
   const discountAmt = subtotal * ((discountPct||0)/100);
   const taxableSubtotal = items.filter(i=>!i.exempt).reduce((s,i)=>s+i.price,0);
@@ -496,8 +497,9 @@ function computeSaleTotals(items, discountPct, taxRatePct){
   const taxableDiscountShare = subtotal>0 ? discountAmt * (taxableSubtotal/subtotal) : 0;
   const taxableAfterDiscount = Math.max(0, taxableSubtotal - taxableDiscountShare);
   const taxAmt = taxableAfterDiscount * ((taxRatePct||0)/100);
-  const total = Math.max(0, subtotal - discountAmt) + taxAmt;
-  return { subtotal, discountAmt, taxableSubtotal, nonTaxableSubtotal, taxAmt, total };
+  const tipAmt = Number(tip)||0;
+  const total = Math.max(0, subtotal - discountAmt) + taxAmt + tipAmt;
+  return { subtotal, discountAmt, taxableSubtotal, nonTaxableSubtotal, taxAmt, tip: tipAmt, total };
 }
 function fmtDate(d){
   const dt = new Date(d + 'T00:00:00');
@@ -523,7 +525,7 @@ function escapeHtml(s){
 
 /* ---------------- Router ---------------- */
 let currentPage = 'dashboard';
-let checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'', date: todayStr() };
+let checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'', date: todayStr(), tip:0 };
 
 function navigate(page){
   currentPage = page;
@@ -712,7 +714,7 @@ let showQuickAdd = false;
 function renderCheckout(){
   const todaysAppts = DATA.appointments.filter(a=>a.date===todayStr() && a.status==='scheduled');
   const taxRate = DATA.business.taxRate || 0;
-  const totals = computeSaleTotals(checkoutState.items, checkoutState.discount, taxRate);
+  const totals = computeSaleTotals(checkoutState.items, checkoutState.discount, taxRate, checkoutState.tip);
 
   if(DATA.clients.length===0){
     return `
@@ -798,6 +800,11 @@ function renderCheckout(){
             <input type="number" id="discountInput" min="0" max="100" value="${checkoutState.discount}">
           </div>
           <div class="field">
+            <label>Tip ($)</label>
+            <input type="number" id="tipInput" min="0" step="0.01" value="${checkoutState.tip}">
+            <p class="small-muted" style="margin-top:4px;margin-bottom:0;">Tips aren't taxed and are tracked separately from service revenue.</p>
+          </div>
+          <div class="field">
             <label>Payment Method *</label>
             <select id="paymentMethodSelect">
               <option value="">-- select --</option>
@@ -807,6 +814,7 @@ function renderCheckout(){
           <div class="cart-total-row"><span>Subtotal</span><span>${fmtMoney(totals.subtotal)}</span></div>
           <div class="cart-total-row"><span>Discount</span><span>-${fmtMoney(totals.discountAmt)}</span></div>
           <div class="cart-total-row"><span>Tax (${taxRate}% on ${fmtMoney(totals.taxableSubtotal)} taxable)</span><span>${fmtMoney(totals.taxAmt)}</span></div>
+          <div class="cart-total-row"><span>Tip</span><span>${fmtMoney(totals.tip)}</span></div>
           <div class="cart-total-row grand"><span>Total</span><span>${fmtMoney(totals.total)}</span></div>
           <button class="btn" style="width:100%;justify-content:center;margin-top:16px;" data-action="complete-sale" ${checkoutState.items.length===0?'disabled':''}>Complete Sale</button>
         </div>
@@ -937,7 +945,7 @@ function renderOrders(){
     </div>
     <div class="card">
       ${orders.length===0 ? `<div class="empty"><div class="big">&#128203;</div>No orders found.</div>` :
-      `<table><thead><tr><th>Date</th><th>Receipt #</th><th>Client</th><th>Items</th><th>Payment</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>
+      `<table><thead><tr><th>Date</th><th>Receipt #</th><th>Client</th><th>Items</th><th>Payment</th><th>Tips</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>
         ${orders.map(s=>`
           <tr style="${s.status==='cancelled'?'opacity:0.5;':''}">
             <td>${fmtDate(s.date)} ${s.time}</td>
@@ -945,6 +953,7 @@ function renderOrders(){
             <td>${escapeHtml(clientName(s.clientId))}</td>
             <td>${s.items.map(i=>escapeHtml(i.name)).join(', ')}</td>
             <td>${escapeHtml(s.paymentMethodName||'-')}</td>
+            <td>${fmtMoney(s.tip||0)}</td>
             <td>${fmtMoney(s.total)}</td>
             <td><span class="badge ${s.status==='cancelled'?'cancelled':'completed'}">${s.status}</span></td>
             <td style="text-align:right;white-space:nowrap;">
@@ -990,7 +999,15 @@ function renderReports(){
   const activeSales = sales.filter(s=>s.status!=='cancelled');
   const totalSubtotal = activeSales.reduce((s,x)=>s+x.subtotal,0);
   const totalTax = activeSales.reduce((s,x)=>s+x.taxAmt,0);
+  const totalTips = activeSales.reduce((s,x)=>s+(x.tip||0),0);
   const totalSales = activeSales.reduce((s,x)=>s+x.total,0);
+
+  // Total tips for the current calendar year, independent of the date filter above
+  const currentYear = new Date().getFullYear();
+  const tipsThisYear = DATA.sales
+    .filter(s=>s.status!=='cancelled' && new Date(s.date+'T00:00:00').getFullYear()===currentYear)
+    .reduce((sum,s)=>sum+(s.tip||0),0);
+  const tipsOverLimit = tipsThisYear > 25000;
 
   // group by payment method (active sales only)
   const groups = {};
@@ -998,11 +1015,12 @@ function renderReports(){
     const key = s.paymentMethodId || 'none';
     if(!groups[key]){
       const pm = paymentMethodById(s.paymentMethodId);
-      groups[key] = { name: s.paymentMethodName || (pm?pm.name:'Unknown'), feePercent: pm ? pm.feePercent : 0, count:0, subtotal:0, tax:0, total:0 };
+      groups[key] = { name: s.paymentMethodName || (pm?pm.name:'Unknown'), feePercent: pm ? pm.feePercent : 0, count:0, subtotal:0, tax:0, tip:0, total:0 };
     }
     groups[key].count++;
     groups[key].subtotal += s.subtotal;
     groups[key].tax += s.taxAmt;
+    groups[key].tip += (s.tip||0);
     groups[key].total += s.total;
   });
   const groupRows = Object.values(groups).sort((a,b)=>b.total-a.total);
@@ -1025,17 +1043,24 @@ function renderReports(){
       <input type="date" id="reportToInput" value="${reportTo}">
     </div>
 
-    <div class="grid cards-3" style="margin-bottom:24px;">
+    <div class="grid cards-3" style="margin-bottom:16px;">
       <div class="card stat-card"><div class="label">Total Subtotal</div><div class="value">${fmtMoney(totalSubtotal)}</div></div>
       <div class="card stat-card"><div class="label">Total Sales Tax</div><div class="value">${fmtMoney(totalTax)}</div></div>
       <div class="card stat-card"><div class="label">Total Sales</div><div class="value">${fmtMoney(totalSales)}</div></div>
     </div>
+    <div class="grid cards-3" style="margin-bottom:24px;">
+      <div class="card stat-card">
+        <div class="label">Total Tips (${currentYear})</div>
+        <div class="value" style="${tipsOverLimit?'color:var(--danger);':''}">${fmtMoney(tipsThisYear)}</div>
+        ${tipsOverLimit ? `<div class="small-muted" style="color:var(--danger);margin-top:2px;">Over $25,000 for the year</div>` : ''}
+      </div>
+    </div>
 
     <div class="card" style="margin-bottom:24px;">
       <h3 style="margin-bottom:4px;font-size:15px;">Sales Ledger</h3>
-      <p class="small-muted" style="margin-bottom:14px;">Cancelled sales are kept for your records but excluded from totals below.</p>
+      <p class="small-muted" style="margin-bottom:14px;">Cancelled sales are kept for your records but excluded from totals below. Tips are not taxed and aren't part of service revenue.</p>
       ${sales.length===0 ? `<div class="empty"><div class="big">&#128202;</div>No sales in this date range.</div>` :
-      `<table><thead><tr><th>Date</th><th>Receipt #</th><th>Client</th><th>Payment Method</th><th>Subtotal</th><th>Tax</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>
+      `<table><thead><tr><th>Date</th><th>Receipt #</th><th>Client</th><th>Payment Method</th><th>Subtotal</th><th>Tax</th><th>Tips</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>
         ${sales.map(s=>`
           <tr style="${s.status==='cancelled'?'opacity:0.5;':''}">
             <td>${fmtDate(s.date)}</td>
@@ -1044,6 +1069,7 @@ function renderReports(){
             <td>${escapeHtml(s.paymentMethodName||'-')}</td>
             <td>${fmtMoney(s.subtotal)}</td>
             <td>${fmtMoney(s.taxAmt)}</td>
+            <td>${fmtMoney(s.tip||0)}</td>
             <td>${fmtMoney(s.total)}</td>
             <td><span class="badge ${s.status==='cancelled'?'cancelled':'completed'}">${s.status}</span></td>
             <td style="text-align:right;white-space:nowrap;">
@@ -1062,6 +1088,7 @@ function renderReports(){
           <td colspan="4">Totals (excludes cancelled)</td>
           <td>${fmtMoney(totalSubtotal)}</td>
           <td>${fmtMoney(totalTax)}</td>
+          <td>${fmtMoney(totalTips)}</td>
           <td>${fmtMoney(totalSales)}</td>
           <td colspan="2"></td>
         </tr>
@@ -1073,7 +1100,7 @@ function renderReports(){
       <h3 style="margin-bottom:4px;font-size:15px;">By Payment Method</h3>
       <p class="small-muted" style="margin-bottom:14px;">Fee % is what your processor charges you — set it in Admin. Shown here only, never on customer receipts.</p>
       ${groupRows.length===0 ? `<div class="empty">No sales in this date range.</div>` :
-      `<table><thead><tr><th>Payment Method</th><th># Sales</th><th>Subtotal</th><th>Tax</th><th>Total</th><th>Fee %</th><th>Fee Amount</th><th>Net After Fee</th></tr></thead><tbody>
+      `<table><thead><tr><th>Payment Method</th><th># Sales</th><th>Subtotal</th><th>Tax</th><th>Tips</th><th>Total</th><th>Fee %</th><th>Fee Amount</th><th>Net After Fee</th></tr></thead><tbody>
         ${groupRows.map(g=>{
           const feeAmt = g.total * (g.feePercent/100);
           const net = g.total - feeAmt;
@@ -1082,6 +1109,7 @@ function renderReports(){
             <td>${g.count}</td>
             <td>${fmtMoney(g.subtotal)}</td>
             <td>${fmtMoney(g.tax)}</td>
+            <td>${fmtMoney(g.tip)}</td>
             <td>${fmtMoney(g.total)}</td>
             <td>${g.feePercent}%</td>
             <td>${fmtMoney(feeAmt)}</td>
@@ -1091,7 +1119,7 @@ function renderReports(){
       </tbody>
       <tfoot>
         <tr style="font-weight:700;">
-          <td colspan="4">Totals</td>
+          <td colspan="5">Totals</td>
           <td>${fmtMoney(totalSales)}</td>
           <td></td>
           <td>${fmtMoney(totalFees)}</td>
@@ -1105,9 +1133,9 @@ function renderReports(){
 
 function exportReportCsv(){
   const sales = getFilteredSales();
-  const rows = [['Date','Receipt #','Client','Payment Method','Subtotal','Tax','Total','Status']];
+  const rows = [['Date','Receipt #','Client','Payment Method','Subtotal','Tax','Tips','Total','Status']];
   sales.forEach(s=>{
-    rows.push([s.date, s.receiptNumber, clientName(s.clientId), s.paymentMethodName||'', s.subtotal.toFixed(2), s.taxAmt.toFixed(2), s.total.toFixed(2), s.status]);
+    rows.push([s.date, s.receiptNumber, clientName(s.clientId), s.paymentMethodName||'', s.subtotal.toFixed(2), s.taxAmt.toFixed(2), (s.tip||0).toFixed(2), s.total.toFixed(2), s.status]);
   });
   const csv = rows.map(r=>r.map(cell=>{
     const v = String(cell);
@@ -1136,6 +1164,7 @@ function openEditSaleModal(saleId){
     items: sale.items.map(i=>({...i, exempt: !!i.exempt})),
     discount: sale.discount,
     taxRate: sale.taxRate,
+    tip: sale.tip || 0,
     paymentMethodId: sale.paymentMethodId
   };
   renderEditSaleModal();
@@ -1143,7 +1172,7 @@ function openEditSaleModal(saleId){
 
 function editSaleModalHtml(){
   const taxRate = editSaleState.taxRate;
-  const totals = computeSaleTotals(editSaleState.items, editSaleState.discount, taxRate);
+  const totals = computeSaleTotals(editSaleState.items, editSaleState.discount, taxRate, editSaleState.tip);
   return `
     <div class="modal wide">
       <div class="modal-header"><h3>Edit Sale</h3><button class="modal-close" data-close-modal>&#10005;</button></div>
@@ -1188,6 +1217,10 @@ function editSaleModalHtml(){
           <div class="field"><label>Tax Rate (%)</label><input type="number" id="esTaxRate" min="0" step="0.01" value="${editSaleState.taxRate}"></div>
         </div>
         <div class="field">
+          <label>Tip ($)</label>
+          <input type="number" id="esTip" min="0" step="0.01" value="${editSaleState.tip}">
+        </div>
+        <div class="field">
           <label>Payment Method</label>
           <select id="esPaymentMethod">
             <option value="">-- select --</option>
@@ -1197,6 +1230,7 @@ function editSaleModalHtml(){
         <div class="cart-total-row"><span>Subtotal</span><span>${fmtMoney(totals.subtotal)}</span></div>
         <div class="cart-total-row"><span>Discount</span><span>-${fmtMoney(totals.discountAmt)}</span></div>
         <div class="cart-total-row"><span>Tax (${taxRate}% on ${fmtMoney(totals.taxableSubtotal)} taxable)</span><span>${fmtMoney(totals.taxAmt)}</span></div>
+        <div class="cart-total-row"><span>Tip</span><span>${fmtMoney(totals.tip)}</span></div>
         <div class="cart-total-row grand"><span>Total</span><span>${fmtMoney(totals.total)}</span></div>
       </div>
       <div class="modal-footer">
@@ -1218,6 +1252,7 @@ function attachEditSaleHandlers(){
   document.getElementById('esClient').addEventListener('change', e=>{ editSaleState.clientId = e.target.value; });
   document.getElementById('esDiscount').addEventListener('change', e=>{ editSaleState.discount = Number(e.target.value)||0; renderEditSaleModal(); });
   document.getElementById('esTaxRate').addEventListener('change', e=>{ editSaleState.taxRate = Number(e.target.value)||0; renderEditSaleModal(); });
+  document.getElementById('esTip').addEventListener('change', e=>{ editSaleState.tip = Number(e.target.value)||0; renderEditSaleModal(); });
   document.getElementById('esPaymentMethod').addEventListener('change', e=>{ editSaleState.paymentMethodId = e.target.value; });
   document.querySelectorAll('.esItemName').forEach(inp=>inp.addEventListener('change', e=>{
     editSaleState.items[Number(e.currentTarget.dataset.idx)].name = e.target.value;
@@ -1250,7 +1285,7 @@ function saveEditedSale(){
   if(!sale) return;
   if(!editSaleState.clientId){ toast('Please select a client'); return; }
   if(editSaleState.items.length===0){ toast('A sale needs at least one item'); return; }
-  const totals = computeSaleTotals(editSaleState.items, editSaleState.discount, editSaleState.taxRate);
+  const totals = computeSaleTotals(editSaleState.items, editSaleState.discount, editSaleState.taxRate, editSaleState.tip);
   const pm = paymentMethodById(editSaleState.paymentMethodId);
   Object.assign(sale, {
     clientId: editSaleState.clientId,
@@ -1261,7 +1296,7 @@ function saveEditedSale(){
     subtotal: totals.subtotal, discountAmt: totals.discountAmt,
     taxRate: editSaleState.taxRate,
     taxableSubtotal: totals.taxableSubtotal, nonTaxableSubtotal: totals.nonTaxableSubtotal,
-    taxAmt: totals.taxAmt,
+    taxAmt: totals.taxAmt, tip: totals.tip,
     total: totals.total,
     paymentMethodId: editSaleState.paymentMethodId,
     paymentMethodName: pm ? pm.name : ''
@@ -1319,6 +1354,12 @@ function attachPageHandlers(){
   const discountInput = document.getElementById('discountInput');
   if(discountInput) discountInput.addEventListener('input', e=>{
     checkoutState.discount = Number(e.target.value)||0;
+    render();
+  });
+
+  const tipInput = document.getElementById('tipInput');
+  if(tipInput) tipInput.addEventListener('input', e=>{
+    checkoutState.tip = Number(e.target.value)||0;
     render();
   });
 
@@ -1527,7 +1568,7 @@ function handleAction(action, id, el){
     if(!checkoutState.clientId){ toast('Please select a client'); return; }
     if(!checkoutState.paymentMethodId){ toast('Please select a payment method'); return; }
     const taxRate = DATA.business.taxRate || 0;
-    const totals = computeSaleTotals(checkoutState.items, checkoutState.discount, taxRate);
+    const totals = computeSaleTotals(checkoutState.items, checkoutState.discount, taxRate, checkoutState.tip);
     const pm = paymentMethodById(checkoutState.paymentMethodId);
     const receiptNumber = DATA.nextReceiptNumber || (DATA.sales.length + 1);
     DATA.nextReceiptNumber = receiptNumber + 1;
@@ -1539,7 +1580,7 @@ function handleAction(action, id, el){
       discount: checkoutState.discount,
       subtotal: totals.subtotal, discountAmt: totals.discountAmt, taxRate,
       taxableSubtotal: totals.taxableSubtotal, nonTaxableSubtotal: totals.nonTaxableSubtotal,
-      taxAmt: totals.taxAmt, total: totals.total,
+      taxAmt: totals.taxAmt, tip: totals.tip, total: totals.total,
       paymentMethodId: checkoutState.paymentMethodId,
       paymentMethodName: pm ? pm.name : '',
       date: checkoutState.date || todayStr(),
@@ -1552,7 +1593,7 @@ function handleAction(action, id, el){
       if(a) a.status='completed';
     }
     saveData();
-    checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'', date: todayStr() };
+    checkoutState = { clientId:'', items:[], discount:0, linkedAppointmentId:'', paymentMethodId:'', date: todayStr(), tip:0 };
     render();
     openReceiptModal(sale);
     return;
@@ -1682,6 +1723,7 @@ function openReceiptModal(sale){
           <div class="totals-row"><span>Subtotal</span><span>${fmtMoney(sale.subtotal)}</span></div>
           ${sale.discount>0 ? `<div class="totals-row"><span>Discount (${sale.discount}%)</span><span>-${fmtMoney(sale.discountAmt)}</span></div>` : ''}
           <div class="totals-row"><span>Tax (${sale.taxRate}%${(sale.items && sale.items.some(i=>i.exempt)) ? ', some items exempt' : ''})</span><span>${fmtMoney(sale.taxAmt)}</span></div>
+          ${sale.tip>0 ? `<div class="totals-row"><span>Tip</span><span>${fmtMoney(sale.tip)}</span></div>` : ''}
           <div class="grand-total"><span>Total</span><span>${fmtMoney(sale.total)}</span></div>
           <div class="divider"></div>
           <div class="center">${escapeHtml(b.receiptNote||'')}</div>
