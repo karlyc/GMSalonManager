@@ -80,7 +80,7 @@
   .empty{text-align:center;padding:48px 20px;color:var(--text-muted);}
   .empty .big{font-size:32px;margin-bottom:8px;}
 
-  input[type=text],input[type=tel],input[type=email],input[type=date],input[type=time],input[type=number],select,textarea{
+  input[type=text],input[type=tel],input[type=email],input[type=date],input[type=time],input[type=month],input[type=number],select,textarea{
     width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff;color:var(--text);
   }
   input:focus,select:focus,textarea:focus{outline:2px solid var(--primary);outline-offset:1px;}
@@ -186,6 +186,7 @@
     <a class="nav-item" data-page="clients"><span class="ic">&#128100;</span> Clients</a>
     <a class="nav-item" data-page="checkout"><span class="ic">&#128176;</span> Checkout</a>
     <a class="nav-item" data-page="orders"><span class="ic">&#128203;</span> Orders</a>
+    <a class="nav-item" data-page="expenses"><span class="ic">&#128179;</span> Expenses</a>
     <a class="nav-item" data-page="reports"><span class="ic">&#128202;</span> Reports</a>
     <a class="nav-item" data-page="admin"><span class="ic">&#9881;</span> Admin</a>
     <div class="sidebar-footer">
@@ -300,6 +301,7 @@ function loadData(){
       ],
       appointments: [],
       sales: [],
+      expenses: [],
       nextReceiptNumber: 1,
       business: { name:'My Salon', address:'', phone:'', email:'', taxRate: 0, receiptNote:'Thank you for visiting!' },
       paymentMethods: [ {id:uid(), name:'Cash', feePercent:0}, {id:uid(), name:'Credit Card', feePercent:2.9} ]
@@ -321,6 +323,7 @@ function loadData(){
     }
   });
   data.sales.forEach(s=>{ if(s.tip===undefined){ s.tip = 0; changed = true; } });
+  if(!data.expenses){ data.expenses = []; changed = true; }
   if(!data.nextReceiptNumber){
     const maxExisting = data.sales.reduce((max,s)=>Math.max(max, s.receiptNumber||0), 0);
     data.nextReceiptNumber = maxExisting + 1;
@@ -393,6 +396,7 @@ async function writeToFile(){
 function mergeImportedData(imported){
   if(!imported.business) imported.business = { name:'My Salon', address:'', phone:'', email:'', taxRate:0, receiptNote:'' };
   if(!imported.paymentMethods) imported.paymentMethods = [{id:uid(),name:'Cash'}];
+  if(!imported.expenses) imported.expenses = [];
   return imported;
 }
 
@@ -544,6 +548,7 @@ function render(){
   else if(currentPage==='clients') main.innerHTML = renderClients();
   else if(currentPage==='checkout') main.innerHTML = renderCheckout();
   else if(currentPage==='orders') main.innerHTML = renderOrders();
+  else if(currentPage==='expenses') main.innerHTML = renderExpenses();
   else if(currentPage==='reports') main.innerHTML = renderReports();
   else if(currentPage==='admin') main.innerHTML = renderAdmin();
   attachPageHandlers();
@@ -919,6 +924,182 @@ function renderServicesEditList(){
       <button class="icon-btn removeSvcBtn" title="Remove">&#128465;</button>
     </div>
   `).join('');
+}
+
+/* ---------------- Expenses ---------------- */
+let expenseMonth = todayStr().slice(0,7);
+
+function getExpenses(){
+  if(!Array.isArray(DATA.expenses)) DATA.expenses = [];
+  return DATA.expenses;
+}
+function shiftMonth(ym, delta){
+  const [y,m] = ym.split('-').map(Number);
+  const d = new Date(y, m-1+delta, 1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+function fmtMonth(ym){
+  const [y,m] = ym.split('-').map(Number);
+  return new Date(y, m-1, 1).toLocaleDateString(undefined,{month:'long', year:'numeric'});
+}
+function expenseAppliesToMonth(e, ym){
+  if(e.type==='monthly'){
+    if(e.month > ym) return false;
+    if(e.endedFrom && ym >= e.endedFrom) return false;
+    return true;
+  }
+  return e.month === ym;
+}
+function expensesForMonth(ym){
+  return getExpenses().filter(e=>expenseAppliesToMonth(e, ym));
+}
+function expenseTotalForMonth(ym){
+  return expensesForMonth(ym).reduce((s,e)=>s+(Number(e.amount)||0),0);
+}
+
+function renderExpenses(){
+  const list = expensesForMonth(expenseMonth).sort((a,b)=>{
+    if(a.type!==b.type) return a.type==='monthly' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  const monthlyTotal = list.filter(e=>e.type==='monthly').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const oneTimeTotal = list.filter(e=>e.type!=='monthly').reduce((s,e)=>s+(Number(e.amount)||0),0);
+  const monthTotal = monthlyTotal + oneTimeTotal;
+
+  const year = expenseMonth.slice(0,4);
+  const yearMonths = Array.from({length:12}, (_,i)=> year+'-'+String(i+1).padStart(2,'0'));
+  const yearTotal = yearMonths.reduce((s,ym)=>s+expenseTotalForMonth(ym),0);
+
+  return `
+    <div class="page-header">
+      <div><h2>Expenses</h2><div class="sub">Track what the business spends each month</div></div>
+      <button class="btn" data-action="new-expense">+ Add Expense</button>
+    </div>
+
+    <div class="toolbar">
+      <button class="btn secondary sm" data-action="exp-prev">&larr;</button>
+      <input type="month" id="expenseMonthInput" value="${expenseMonth}" style="width:auto;">
+      <button class="btn secondary sm" data-action="exp-next">&rarr;</button>
+      <button class="btn secondary sm" data-action="exp-this">This Month</button>
+    </div>
+
+    <div class="grid cards-3" style="margin-bottom:24px;">
+      <div class="card stat-card"><div class="label">${escapeHtml(fmtMonth(expenseMonth))} Total</div><div class="value">${fmtMoney(monthTotal)}</div></div>
+      <div class="card stat-card"><div class="label">Monthly (recurring)</div><div class="value">${fmtMoney(monthlyTotal)}</div></div>
+      <div class="card stat-card"><div class="label">One-time</div><div class="value">${fmtMoney(oneTimeTotal)}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:24px;">
+      <h3 style="margin-bottom:4px;font-size:15px;">${escapeHtml(fmtMonth(expenseMonth))}</h3>
+      <p class="small-muted" style="margin-bottom:14px;">Monthly expenses carry forward every month automatically until you stop them. One-time expenses only count in the month they were entered.</p>
+      ${list.length===0 ? `<div class="empty"><div class="big">&#128179;</div>No expenses for this month.</div>` :
+      `<table><thead><tr><th>Expense</th><th>Type</th><th>Amount</th><th>Notes</th><th></th></tr></thead><tbody>
+        ${list.map(e=>`
+          <tr>
+            <td>${escapeHtml(e.name)}</td>
+            <td><span class="badge ${e.type==='monthly'?'scheduled':'completed'}">${e.type==='monthly'?'Monthly':'One-time'}</span></td>
+            <td>${fmtMoney(e.amount)}</td>
+            <td>${escapeHtml(e.notes||'')}</td>
+            <td style="text-align:right;white-space:nowrap;">
+              <button class="icon-btn" data-action="edit-expense" data-id="${e.id}" title="Edit">&#9998;</button>
+              ${e.type==='monthly' ? `<button class="icon-btn" data-action="stop-expense" data-id="${e.id}" title="Stop from this month onward">&#9209;</button>` : ''}
+              <button class="icon-btn" data-action="delete-expense" data-id="${e.id}" title="Delete">&#128465;</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="font-weight:700;">
+          <td colspan="2">Total</td>
+          <td>${fmtMoney(monthTotal)}</td>
+          <td colspan="2"></td>
+        </tr>
+      </tfoot>
+      </table>`}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:4px;font-size:15px;">${year} by Month</h3>
+      <p class="small-muted" style="margin-bottom:14px;">Click a month to view its expenses.</p>
+      <table><thead><tr><th>Month</th><th>Total Expenses</th></tr></thead><tbody>
+        ${yearMonths.map(ym=>`
+          <tr style="cursor:pointer;${ym===expenseMonth?'background:var(--primary-light);':''}" data-action="exp-goto" data-month="${ym}">
+            <td>${escapeHtml(fmtMonth(ym))}</td>
+            <td>${fmtMoney(expenseTotalForMonth(ym))}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="font-weight:700;"><td>${year} Total</td><td>${fmtMoney(yearTotal)}</td></tr>
+      </tfoot>
+      </table>
+    </div>
+  `;
+}
+
+function openExpenseModal(existing){
+  const isEdit = !!existing;
+  const e = existing || { name:'', type:'one-time', amount:'', notes:'', month: expenseMonth, endedFrom:'' };
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>${isEdit?'Edit Expense':'New Expense'}</h3><button class="modal-close" data-close-modal>&#10005;</button></div>
+      <div class="modal-body">
+        <div class="field"><label>Name of expense *</label><input type="text" id="exName" value="${escapeHtml(e.name)}" placeholder="e.g. Rent, Hair products"></div>
+        <div class="field-row">
+          <div class="field">
+            <label>Type</label>
+            <select id="exType">
+              <option value="one-time" ${e.type!=='monthly'?'selected':''}>One time</option>
+              <option value="monthly" ${e.type==='monthly'?'selected':''}>Monthly</option>
+            </select>
+          </div>
+          <div class="field"><label>Amount ($) *</label><input type="number" id="exAmount" min="0" step="0.01" value="${e.amount}"></div>
+        </div>
+        <div class="field">
+          <label id="exMonthLabel">${e.type==='monthly'?'Starts in':'Month'}</label>
+          <input type="month" id="exMonth" value="${e.month}">
+        </div>
+        <div class="field" id="exEndWrap" style="${e.type==='monthly'?'':'display:none;'}">
+          <label>Stops from (optional)</label>
+          <input type="month" id="exEnd" value="${e.endedFrom||''}">
+          <p class="small-muted" style="margin-top:4px;margin-bottom:0;">Leave blank to keep charging it every month.</p>
+        </div>
+        <div class="field"><label>Notes</label><textarea id="exNotes" rows="3">${escapeHtml(e.notes||'')}</textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" data-close-modal>Cancel</button>
+        <button class="btn" id="saveExpenseBtn">${isEdit?'Save Changes':'Add Expense'}</button>
+      </div>
+    </div>
+  `);
+  document.getElementById('exType').addEventListener('change', ev=>{
+    const monthly = ev.target.value==='monthly';
+    document.getElementById('exEndWrap').style.display = monthly ? '' : 'none';
+    document.getElementById('exMonthLabel').textContent = monthly ? 'Starts in' : 'Month';
+  });
+  document.getElementById('saveExpenseBtn').addEventListener('click', ()=>{
+    const name = document.getElementById('exName').value.trim();
+    const type = document.getElementById('exType').value;
+    const amountRaw = document.getElementById('exAmount').value;
+    const amount = Number(amountRaw);
+    const month = document.getElementById('exMonth').value;
+    const endedFrom = type==='monthly' ? document.getElementById('exEnd').value : '';
+    const notes = document.getElementById('exNotes').value.trim();
+    if(!name){ toast('Please enter a name'); return; }
+    if(amountRaw==='' || isNaN(amount) || amount<0){ toast('Please enter an amount'); return; }
+    if(!month){ toast('Please choose a month'); return; }
+    if(endedFrom && endedFrom <= month){ toast('"Stops from" must be after the start month'); return; }
+    if(isEdit){
+      Object.assign(existing, { name, type, amount, month, endedFrom, notes });
+    } else {
+      getExpenses().push({ id:uid(), name, type, amount, month, endedFrom, notes });
+    }
+    saveData();
+    closeModal();
+    expenseMonth = month;
+    render();
+    toast(isEdit?'Expense updated':'Expense added');
+  });
 }
 
 /* ---------------- Orders ---------------- */
@@ -1326,6 +1507,9 @@ function attachPageHandlers(){
   const search = document.getElementById('clientSearchInput');
   if(search) search.addEventListener('input', e=>{ clientSearch = e.target.value; render(); });
 
+  const expenseMonthInput = document.getElementById('expenseMonthInput');
+  if(expenseMonthInput) expenseMonthInput.addEventListener('change', e=>{ if(e.target.value){ expenseMonth = e.target.value; render(); } });
+
   const orderSearchEl = document.getElementById('orderSearchInput');
   if(orderSearchEl) orderSearchEl.addEventListener('input', e=>{ orderSearch = e.target.value; render(); });
 
@@ -1488,6 +1672,7 @@ function attachPageHandlers(){
         if(!imported.clients || !imported.services){ toast('Invalid backup file'); return; }
         if(!imported.business) imported.business = { name:'My Salon', address:'', phone:'', email:'', taxRate:0, receiptNote:'' };
         if(!imported.paymentMethods) imported.paymentMethods = [{id:uid(),name:'Cash'}];
+        if(!imported.expenses) imported.expenses = [];
         if(confirm('This will replace all current data with the backup. Continue?')){
           DATA = imported;
           saveData();
@@ -1537,6 +1722,39 @@ function handleAction(action, id, el){
   if(action==='report-week'){ reportFrom=startOfWeek(todayStr()); reportTo=todayStr(); return render(); }
   if(action==='report-month'){ reportFrom=startOfMonth(todayStr()); reportTo=todayStr(); return render(); }
   if(action==='export-report-csv'){ exportReportCsv(); return; }
+  if(action==='new-expense'){ openExpenseModal(); return; }
+  if(action==='edit-expense'){ openExpenseModal(getExpenses().find(x=>x.id===id)); return; }
+  if(action==='exp-prev'){ expenseMonth = shiftMonth(expenseMonth,-1); return render(); }
+  if(action==='exp-next'){ expenseMonth = shiftMonth(expenseMonth,1); return render(); }
+  if(action==='exp-this'){ expenseMonth = todayStr().slice(0,7); return render(); }
+  if(action==='exp-goto'){ expenseMonth = el.dataset.month; return render(); }
+  if(action==='delete-expense'){
+    const ex = getExpenses().find(x=>x.id===id);
+    const msg = ex && ex.type==='monthly'
+      ? 'Delete this monthly expense? It will be removed from every month, including past ones. (To keep past months, use the stop button instead.)'
+      : 'Delete this expense?';
+    if(confirm(msg)){
+      DATA.expenses = getExpenses().filter(x=>x.id!==id);
+      saveData(); render(); toast('Expense deleted');
+    }
+    return;
+  }
+  if(action==='stop-expense'){
+    const ex = getExpenses().find(x=>x.id===id);
+    if(!ex) return;
+    if(expenseMonth <= ex.month){
+      if(confirm('This expense starts this month, so stopping it here would remove it entirely. Delete it?')){
+        DATA.expenses = getExpenses().filter(x=>x.id!==id);
+        saveData(); render(); toast('Expense deleted');
+      }
+      return;
+    }
+    if(confirm('Stop "'+ex.name+'" from '+fmtMonth(expenseMonth)+' onward? Earlier months keep it.')){
+      ex.endedFrom = expenseMonth;
+      saveData(); render(); toast('Recurring expense stopped');
+    }
+    return;
+  }
   if(action==='edit-sale'){ openEditSaleModal(id); return; }
   if(action==='cancel-sale'){
     if(confirm('Cancel this sale? It will be kept for your records but excluded from totals.')){
