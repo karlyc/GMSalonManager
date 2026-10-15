@@ -43,6 +43,8 @@
   .nav-item.active{background:rgba(255,255,255,0.1);color:#fff;border-left-color:var(--accent);}
   .nav-item .ic{font-size:16px;width:18px;text-align:center;}
   .sidebar-footer{margin-top:auto;padding:16px 24px 0;}
+  .settings-btn{width:100%;text-align:left;background:transparent;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.75);padding:10px 12px;border-radius:8px;font-size:13px;}
+  .settings-btn:hover{background:rgba(255,255,255,0.08);color:#fff;}
 
   /* Main */
   .main{flex:1;padding:32px 40px;overflow-y:auto;}
@@ -76,6 +78,10 @@
   .badge.scheduled{background:var(--primary-light);color:var(--primary-dark);}
   .badge.completed{background:var(--success-light);color:var(--success);}
   .badge.cancelled{background:var(--danger-light);color:var(--danger);}
+  .badge.overdue{background:var(--danger-light);color:var(--danger);}
+  .badge.partial{background:#F8EFD9;color:#8A6A1F;}
+  .badge.upcoming{background:var(--primary-light);color:var(--primary-dark);}
+  .badge.paid{background:var(--success-light);color:var(--success);}
 
   .empty{text-align:center;padding:48px 20px;color:var(--text-muted);}
   .empty .big{font-size:32px;margin-bottom:8px;}
@@ -187,6 +193,7 @@
     <a class="nav-item" data-page="checkout"><span class="ic">&#128176;</span> Checkout</a>
     <a class="nav-item" data-page="orders"><span class="ic">&#128203;</span> Orders</a>
     <a class="nav-item" data-page="expenses"><span class="ic">&#128179;</span> Expenses</a>
+    <a class="nav-item" data-page="suites"><span class="ic">&#127970;</span> Suites</a>
     <a class="nav-item" data-page="reports"><span class="ic">&#128202;</span> Reports</a>
     <a class="nav-item" data-page="admin"><span class="ic">&#9881;</span> Admin</a>
     <div class="sidebar-footer">
@@ -302,6 +309,9 @@ function loadData(){
       appointments: [],
       sales: [],
       expenses: [],
+      subtenants: [],
+      suitePayments: [],
+      nextSuiteReceiptNumber: 1,
       nextReceiptNumber: 1,
       business: { name:'My Salon', address:'', phone:'', email:'', taxRate: 0, receiptNote:'Thank you for visiting!' },
       paymentMethods: [ {id:uid(), name:'Cash', feePercent:0}, {id:uid(), name:'Credit Card', feePercent:2.9} ]
@@ -324,6 +334,12 @@ function loadData(){
   });
   data.sales.forEach(s=>{ if(s.tip===undefined){ s.tip = 0; changed = true; } });
   if(!data.expenses){ data.expenses = []; changed = true; }
+  if(!data.subtenants){ data.subtenants = []; changed = true; }
+  if(!data.suitePayments){ data.suitePayments = []; changed = true; }
+  if(!data.nextSuiteReceiptNumber){
+    data.nextSuiteReceiptNumber = data.suitePayments.reduce((max,p)=>Math.max(max,p.receiptNumber||0),0) + 1;
+    changed = true;
+  }
   if(!data.nextReceiptNumber){
     const maxExisting = data.sales.reduce((max,s)=>Math.max(max, s.receiptNumber||0), 0);
     data.nextReceiptNumber = maxExisting + 1;
@@ -397,6 +413,8 @@ function mergeImportedData(imported){
   if(!imported.business) imported.business = { name:'My Salon', address:'', phone:'', email:'', taxRate:0, receiptNote:'' };
   if(!imported.paymentMethods) imported.paymentMethods = [{id:uid(),name:'Cash'}];
   if(!imported.expenses) imported.expenses = [];
+  if(!imported.subtenants) imported.subtenants = [];
+  if(!imported.suitePayments) imported.suitePayments = [];
   return imported;
 }
 
@@ -537,7 +555,11 @@ function navigate(page){
   render();
 }
 document.querySelectorAll('.nav-item').forEach(n=>{
-  n.addEventListener('click', ()=>navigate(n.dataset.page));
+  n.addEventListener('click', ()=>{
+    // clicking the Suites tab always returns to the subtenant list
+    if(n.dataset.page==='suites') openSubtenantId = null;
+    navigate(n.dataset.page);
+  });
 });
 
 function render(){
@@ -549,6 +571,7 @@ function render(){
   else if(currentPage==='checkout') main.innerHTML = renderCheckout();
   else if(currentPage==='orders') main.innerHTML = renderOrders();
   else if(currentPage==='expenses') main.innerHTML = renderExpenses();
+  else if(currentPage==='suites') main.innerHTML = renderSuites();
   else if(currentPage==='reports') main.innerHTML = renderReports();
   else if(currentPage==='admin') main.innerHTML = renderAdmin();
   attachPageHandlers();
@@ -1100,6 +1123,415 @@ function openExpenseModal(existing){
     render();
     toast(isEdit?'Expense updated':'Expense added');
   });
+}
+
+/* ---------------- Suites (subtenants & rent) ---------------- */
+let openSubtenantId = null;
+
+function getSubtenants(){
+  if(!Array.isArray(DATA.subtenants)) DATA.subtenants = [];
+  return DATA.subtenants;
+}
+function getSuitePayments(){
+  if(!Array.isArray(DATA.suitePayments)) DATA.suitePayments = [];
+  return DATA.suitePayments;
+}
+function subtenantById(id){ return getSubtenants().find(s=>s.id===id); }
+function suitePaymentById(id){ return getSuitePayments().find(p=>p.id===id); }
+function fmtSuiteReceipt(n){ return 'S-' + String(n).padStart(4,'0'); }
+function freqLabel(f){ return f==='weekly' ? 'Weekly' : 'Monthly'; }
+function toCents(n){ return Math.round((Number(n)||0)*100); }
+
+function addMonthsClamped(dateStr, n){
+  const [y,m,d] = dateStr.split('-').map(Number);
+  const first = new Date(y, m-1+n, 1);
+  const lastDay = new Date(first.getFullYear(), first.getMonth()+1, 0).getDate();
+  const day = Math.min(d, lastDay);
+  return first.getFullYear()+'-'+String(first.getMonth()+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+}
+
+// Every due date on or before `upTo`, plus `extraUpcoming` dates after it.
+function dueDatesFor(sub, upTo, extraUpcoming){
+  const dues = [];
+  if(!sub.startDate) return dues;
+  let upcomingLeft = extraUpcoming || 0;
+  for(let i=0; i<2000; i++){
+    const d = sub.frequency==='weekly' ? shiftDate(sub.startDate, i*7) : addMonthsClamped(sub.startDate, i);
+    if(sub.endDate && d > sub.endDate) break;
+    if(d <= upTo) dues.push(d);
+    else if(upcomingLeft > 0){ dues.push(d); upcomingLeft--; }
+    else break;
+  }
+  return dues;
+}
+
+function scheduleDescription(freq, startDate){
+  if(!startDate) return '';
+  const d = new Date(startDate+'T00:00:00');
+  if(isNaN(d.getTime())) return '';
+  if(freq==='weekly') return 'Due every ' + d.toLocaleDateString(undefined,{weekday:'long'});
+  const day = d.getDate();
+  return 'Due on day ' + day + ' of each month' + (day>28 ? ' (or the last day of shorter months)' : '');
+}
+
+// Payments are applied to the oldest due date first.
+function suiteStatus(sub){
+  const today = todayStr();
+  const amountC = toCents(sub.amount);
+  const payments = getSuitePayments().filter(p=>p.subtenantId===sub.id);
+  const paidC = payments.reduce((s,p)=>s+toCents(p.amount),0);
+  const dues = dueDatesFor(sub, today, 3);
+  let remainingC = paidC;
+  const schedule = dues.map(date=>{
+    let status, paidAmtC;
+    if(remainingC >= amountC){ status='paid'; paidAmtC = amountC; remainingC -= amountC; }
+    else if(remainingC > 0){ status='partial'; paidAmtC = remainingC; remainingC = 0; }
+    else { status = date <= today ? 'overdue' : 'upcoming'; paidAmtC = 0; }
+    return { date, amount: amountC/100, paidAmt: paidAmtC/100, status };
+  });
+  const dueCount = dues.filter(d=>d<=today).length;
+  const balanceC = dueCount*amountC - paidC;
+  return {
+    paid: paidC/100,
+    expected: dueCount*amountC/100,
+    owed: Math.max(0,balanceC)/100,
+    credit: Math.max(0,-balanceC)/100,
+    schedule,
+    next: schedule.find(s=>s.status!=='paid') || null,
+    payments
+  };
+}
+
+// Balance as of a given receipt: dues up to its date minus payments up to and including it.
+function balanceAtPayment(p){
+  const sub = subtenantById(p.subtenantId);
+  if(!sub) return null;
+  const dueCount = dueDatesFor(sub, p.date, 0).length;
+  const paidC = getSuitePayments()
+    .filter(x=>x.subtenantId===p.subtenantId && (x.date < p.date || (x.date===p.date && (x.receiptNumber||0) <= (p.receiptNumber||0))))
+    .reduce((s,x)=>s+toCents(x.amount),0);
+  return (dueCount*toCents(sub.amount) - paidC)/100;
+}
+
+function renderSuites(){
+  if(openSubtenantId && subtenantById(openSubtenantId)) return renderSubtenantDetail(openSubtenantId);
+  openSubtenantId = null;
+  const rows = getSubtenants().slice().sort((a,b)=>a.name.localeCompare(b.name)).map(s=>({s, st:suiteStatus(s)}));
+  const totalOwed = rows.reduce((sum,r)=>sum+r.st.owed,0);
+  const ym = todayStr().slice(0,7);
+  const collectedThisMonth = getSuitePayments().filter(p=>(p.date||'').slice(0,7)===ym).reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const today = todayStr();
+
+  return `
+    <div class="page-header">
+      <div><h2>Suites</h2><div class="sub">Subtenants, rent due, and payments received</div></div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn secondary" data-action="record-payment">+ Record Payment</button>
+        <button class="btn" data-action="new-subtenant">+ Add Subtenant</button>
+      </div>
+    </div>
+
+    <div class="grid cards-3" style="margin-bottom:24px;">
+      <div class="card stat-card"><div class="label">Total Owed to You</div><div class="value" style="${totalOwed>0?'color:var(--danger);':''}">${fmtMoney(totalOwed)}</div></div>
+      <div class="card stat-card"><div class="label">Collected This Month</div><div class="value">${fmtMoney(collectedThisMonth)}</div></div>
+      <div class="card stat-card"><div class="label">Subtenants</div><div class="value">${rows.length}</div></div>
+    </div>
+
+    <div class="card">
+      ${rows.length===0 ? `<div class="empty"><div class="big">&#127970;</div>No subtenants yet. Add one to start tracking rent.</div>` :
+      `<table><thead><tr><th>Subtenant</th><th>Space</th><th>Rent</th><th>Next Due</th><th>Paid to Date</th><th>Owed</th><th></th></tr></thead><tbody>
+        ${rows.map(({s,st})=>`
+          <tr>
+            <td><button class="link-btn" style="font-size:14px;" data-action="open-subtenant" data-id="${s.id}">${escapeHtml(s.name)}</button></td>
+            <td>${escapeHtml(s.spaceId)}</td>
+            <td>${fmtMoney(s.amount)} <span class="small-muted">${s.frequency==='weekly'?'/ week':'/ month'}</span></td>
+            <td>${st.next
+              ? `${fmtDate(st.next.date)} <span class="badge ${st.next.status}">${st.next.status}</span>`
+              : `<span class="small-muted">${s.endDate && s.endDate < today ? 'Lease ended' : '-'}</span>`}</td>
+            <td>${fmtMoney(st.paid)}</td>
+            <td style="${st.owed>0?'color:var(--danger);font-weight:600;':(st.credit>0?'color:var(--success);':'')}">
+              ${st.owed>0 ? fmtMoney(st.owed) : (st.credit>0 ? fmtMoney(st.credit)+' credit' : fmtMoney(0))}
+            </td>
+            <td style="text-align:right;white-space:nowrap;">
+              <button class="btn sm" data-action="record-payment" data-id="${s.id}">Record Payment</button>
+              <button class="icon-btn" data-action="edit-subtenant" data-id="${s.id}" title="Edit">&#9998;</button>
+              <button class="icon-btn" data-action="delete-subtenant" data-id="${s.id}" title="Delete">&#128465;</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="font-weight:700;"><td colspan="5">Total owed</td><td style="${totalOwed>0?'color:var(--danger);':''}">${fmtMoney(totalOwed)}</td><td></td></tr>
+      </tfoot>
+      </table>`}
+    </div>
+  `;
+}
+
+function renderSubtenantDetail(id){
+  const s = subtenantById(id);
+  const st = suiteStatus(s);
+  const payments = st.payments.slice().sort((a,b)=>(b.date+String(b.receiptNumber).padStart(8,'0')).localeCompare(a.date+String(a.receiptNumber).padStart(8,'0')));
+  const scheduleDesc = scheduleDescription(s.frequency, s.startDate);
+  const schedule = st.schedule.slice().sort((a,b)=>b.date.localeCompare(a.date));
+
+  return `
+    <div class="page-header">
+      <div>
+        <button class="btn secondary sm" data-action="back-suites" style="margin-bottom:10px;">&larr; All Subtenants</button>
+        <h2>${escapeHtml(s.name)}</h2>
+        <div class="sub">Space ${escapeHtml(s.spaceId)} &middot; ${fmtMoney(s.amount)} ${s.frequency==='weekly'?'weekly':'monthly'}${scheduleDesc ? ' &middot; '+escapeHtml(scheduleDesc) : ''}</div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn" data-action="record-payment" data-id="${s.id}">+ Record Payment</button>
+        <button class="btn secondary" data-action="edit-subtenant" data-id="${s.id}">Edit</button>
+        <button class="btn danger" data-action="delete-subtenant" data-id="${s.id}">Delete</button>
+      </div>
+    </div>
+
+    <div class="grid cards-3" style="margin-bottom:24px;">
+      <div class="card stat-card"><div class="label">${st.credit>0 ? 'Paid Ahead' : 'Owed'}</div><div class="value" style="${st.owed>0?'color:var(--danger);':(st.credit>0?'color:var(--success);':'')}">${fmtMoney(st.owed>0 ? st.owed : st.credit)}</div></div>
+      <div class="card stat-card"><div class="label">Total Paid</div><div class="value">${fmtMoney(st.paid)}</div></div>
+      <div class="card stat-card"><div class="label">Expected to Date</div><div class="value">${fmtMoney(st.expected)}</div></div>
+    </div>
+
+    ${s.notes ? `<div class="card" style="margin-bottom:20px;"><h3 style="font-size:15px;margin-bottom:8px;">Notes</h3><div style="font-size:14px;color:var(--text-muted);">${escapeHtml(s.notes)}</div></div>` : ''}
+
+    <div class="card" style="margin-bottom:24px;">
+      <h3 style="margin-bottom:4px;font-size:15px;">Expected Payment Dates</h3>
+      <p class="small-muted" style="margin-bottom:14px;">Payments are applied to the oldest due date first. Includes the next 3 upcoming dates${s.endDate ? ' (lease ends '+escapeHtml(fmtDate(s.endDate))+')' : ''}.</p>
+      ${schedule.length===0 ? `<div class="empty">No due dates yet.</div>` :
+      `<div style="max-height:360px;overflow:auto;">
+        <table><thead><tr><th>Due Date</th><th>Amount</th><th>Applied</th><th>Status</th></tr></thead><tbody>
+          ${schedule.map(r=>`
+            <tr>
+              <td>${fmtDate(r.date)}</td>
+              <td>${fmtMoney(r.amount)}</td>
+              <td>${fmtMoney(r.paidAmt)}</td>
+              <td><span class="badge ${r.status}">${r.status}</span></td>
+            </tr>
+          `).join('')}
+        </tbody></table>
+      </div>`}
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:14px;font-size:15px;">Payments Received</h3>
+      ${payments.length===0 ? `<div class="empty">No payments recorded yet.</div>` :
+      `<table><thead><tr><th>Receipt #</th><th>Date Received</th><th>Amount</th><th>Method</th><th>Notes</th><th></th></tr></thead><tbody>
+        ${payments.map(p=>`
+          <tr>
+            <td>${fmtSuiteReceipt(p.receiptNumber)}</td>
+            <td>${fmtDate(p.date)}</td>
+            <td>${fmtMoney(p.amount)}</td>
+            <td>${escapeHtml(p.paymentMethodName||'-')}</td>
+            <td>${escapeHtml(p.notes||'')}</td>
+            <td style="text-align:right;white-space:nowrap;">
+              <button class="icon-btn" data-action="view-suite-receipt" data-id="${p.id}" title="View receipt">&#128196;</button>
+              <button class="icon-btn" data-action="edit-suite-payment" data-id="${p.id}" title="Edit">&#9998;</button>
+              <button class="icon-btn" data-action="delete-suite-payment" data-id="${p.id}" title="Delete">&#128465;</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody></table>`}
+    </div>
+  `;
+}
+
+function openSubtenantModal(existing){
+  const isEdit = !!existing;
+  const s = existing || { name:'', spaceId:'', amount:'', frequency:'monthly', startDate: todayStr(), endDate:'', notes:'' };
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>${isEdit?'Edit Subtenant':'Add Subtenant'}</h3><button class="modal-close" data-close-modal>&#10005;</button></div>
+      <div class="modal-body">
+        <div class="field"><label>Name *</label><input type="text" id="stName" value="${escapeHtml(s.name)}"></div>
+        <div class="field-row">
+          <div class="field"><label>Space ID *</label><input type="text" id="stSpace" value="${escapeHtml(s.spaceId)}" placeholder="e.g. Suite 3"></div>
+          <div class="field"><label>Payment amount ($) *</label><input type="number" id="stAmount" min="0" step="0.01" value="${s.amount}"></div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Frequency</label>
+            <select id="stFreq">
+              <option value="weekly" ${s.frequency==='weekly'?'selected':''}>Weekly</option>
+              <option value="monthly" ${s.frequency!=='weekly'?'selected':''}>Monthly</option>
+            </select>
+          </div>
+          <div class="field"><label>First payment due *</label><input type="date" id="stStart" value="${s.startDate}"></div>
+        </div>
+        <p class="small-muted" id="stSchedHint" style="margin-top:-6px;margin-bottom:14px;">${escapeHtml(scheduleDescription(s.frequency, s.startDate))}</p>
+        <div class="field">
+          <label>Lease ends (optional)</label>
+          <input type="date" id="stEnd" value="${s.endDate||''}">
+          <p class="small-muted" style="margin-top:4px;margin-bottom:0;">No rent comes due after this date. Leave blank if it's ongoing.</p>
+        </div>
+        <div class="field"><label>Notes</label><textarea id="stNotes" rows="3">${escapeHtml(s.notes||'')}</textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" data-close-modal>Cancel</button>
+        <button class="btn" id="saveSubtenantBtn">${isEdit?'Save Changes':'Add Subtenant'}</button>
+      </div>
+    </div>
+  `);
+  const updateHint = ()=>{
+    document.getElementById('stSchedHint').textContent = scheduleDescription(document.getElementById('stFreq').value, document.getElementById('stStart').value);
+  };
+  document.getElementById('stFreq').addEventListener('change', updateHint);
+  document.getElementById('stStart').addEventListener('change', updateHint);
+  document.getElementById('saveSubtenantBtn').addEventListener('click', ()=>{
+    const name = document.getElementById('stName').value.trim();
+    const spaceId = document.getElementById('stSpace').value.trim();
+    const amountRaw = document.getElementById('stAmount').value;
+    const amount = Number(amountRaw);
+    const frequency = document.getElementById('stFreq').value;
+    const startDate = document.getElementById('stStart').value;
+    const endDate = document.getElementById('stEnd').value;
+    const notes = document.getElementById('stNotes').value.trim();
+    if(!name){ toast('Please enter a name'); return; }
+    if(!spaceId){ toast('Please enter a space ID'); return; }
+    if(amountRaw==='' || isNaN(amount) || amount<=0){ toast('Please enter a payment amount'); return; }
+    if(!startDate){ toast('Please choose the first due date'); return; }
+    if(endDate && endDate < startDate){ toast('Lease end must be after the first due date'); return; }
+    if(isEdit){
+      Object.assign(existing, { name, spaceId, amount, frequency, startDate, endDate, notes });
+    } else {
+      const sub = { id:uid(), name, spaceId, amount, frequency, startDate, endDate, notes };
+      getSubtenants().push(sub);
+      openSubtenantId = sub.id;
+    }
+    saveData();
+    closeModal();
+    render();
+    toast(isEdit?'Subtenant updated':'Subtenant added');
+  });
+}
+
+function openSuitePaymentModal(subtenantId, existing){
+  const subs = getSubtenants().slice().sort((a,b)=>a.name.localeCompare(b.name));
+  if(subs.length===0){ toast('Add a subtenant first'); return; }
+  const isEdit = !!existing;
+  const initialSub = isEdit ? existing.subtenantId : (subtenantId || (subs.length===1 ? subs[0].id : ''));
+  const p = existing || { subtenantId: initialSub, amount:'', date: todayStr(), paymentMethodId:'', notes:'' };
+  const defaultAmount = ()=>{ const sub = subtenantById(document.getElementById('payTenant').value); return sub ? sub.amount : ''; };
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>${isEdit?'Edit Payment':'Record Payment'}</h3><button class="modal-close" data-close-modal>&#10005;</button></div>
+      <div class="modal-body">
+        <div class="field">
+          <label>Subtenant *</label>
+          <select id="payTenant" ${isEdit?'disabled':''}>
+            <option value="">-- select subtenant --</option>
+            ${subs.map(s=>`<option value="${s.id}" ${p.subtenantId===s.id?'selected':''}>${escapeHtml(s.name)} (${escapeHtml(s.spaceId)})</option>`).join('')}
+          </select>
+          <p class="small-muted" id="payOwedHint" style="margin-top:4px;margin-bottom:0;"></p>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Amount received ($) *</label><input type="number" id="payAmount" min="0" step="0.01" value="${p.amount}"></div>
+          <div class="field"><label>Date received *</label><input type="date" id="payDate" value="${p.date}"></div>
+        </div>
+        <div class="field">
+          <label>Payment method</label>
+          <select id="payMethod">
+            <option value="">-- select --</option>
+            ${DATA.paymentMethods.map(m=>`<option value="${m.id}" ${p.paymentMethodId===m.id?'selected':''}>${escapeHtml(m.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Notes</label><textarea id="payNotes" rows="2">${escapeHtml(p.notes||'')}</textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" data-close-modal>Cancel</button>
+        <button class="btn" id="savePaymentBtn">${isEdit?'Save Changes':'Save & Create Receipt'}</button>
+      </div>
+    </div>
+  `);
+  const updateOwedHint = ()=>{
+    const sub = subtenantById(document.getElementById('payTenant').value);
+    const hint = document.getElementById('payOwedHint');
+    if(!sub){ hint.textContent = ''; return; }
+    const st = suiteStatus(sub);
+    hint.textContent = st.owed>0 ? 'Currently owed: ' + fmtMoney(st.owed)
+      : (st.credit>0 ? 'Paid ahead by ' + fmtMoney(st.credit) : 'Nothing owed right now');
+  };
+  updateOwedHint();
+  if(!isEdit && p.subtenantId){ document.getElementById('payAmount').value = defaultAmount(); }
+  document.getElementById('payTenant').addEventListener('change', ()=>{
+    updateOwedHint();
+    if(!isEdit) document.getElementById('payAmount').value = defaultAmount();
+  });
+  document.getElementById('savePaymentBtn').addEventListener('click', ()=>{
+    const tenantId = document.getElementById('payTenant').value;
+    const amountRaw = document.getElementById('payAmount').value;
+    const amount = Number(amountRaw);
+    const date = document.getElementById('payDate').value;
+    const methodId = document.getElementById('payMethod').value;
+    const notes = document.getElementById('payNotes').value.trim();
+    if(!tenantId){ toast('Please select a subtenant'); return; }
+    if(amountRaw==='' || isNaN(amount) || amount<=0){ toast('Please enter the amount received'); return; }
+    if(!date){ toast('Please choose the date received'); return; }
+    const method = DATA.paymentMethods.find(m=>m.id===methodId);
+    const methodName = method ? method.name : '';
+    if(isEdit){
+      Object.assign(existing, { amount, date, paymentMethodId: methodId, paymentMethodName: methodName, notes });
+      saveData();
+      closeModal();
+      render();
+      toast('Payment updated');
+      return;
+    }
+    const maxExisting = getSuitePayments().reduce((max,x)=>Math.max(max,x.receiptNumber||0),0);
+    const receiptNumber = Math.max(DATA.nextSuiteReceiptNumber||1, maxExisting+1);
+    DATA.nextSuiteReceiptNumber = receiptNumber + 1;
+    const payment = { id:uid(), receiptNumber, subtenantId: tenantId, amount, date, paymentMethodId: methodId, paymentMethodName: methodName, notes };
+    getSuitePayments().push(payment);
+    saveData();
+    closeModal();
+    render();
+    openSuiteReceiptModal(payment);
+  });
+}
+
+function openSuiteReceiptModal(p){
+  const b = DATA.business;
+  const sub = subtenantById(p.subtenantId);
+  const bal = balanceAtPayment(p);
+  let balanceRow = '';
+  if(bal!==null){
+    if(bal > 0.005) balanceRow = `<div class="totals-row"><span>Balance owed as of ${escapeHtml(fmtDate(p.date))}</span><span>${fmtMoney(bal)}</span></div>`;
+    else if(bal < -0.005) balanceRow = `<div class="totals-row"><span>Paid ahead (credit)</span><span>${fmtMoney(-bal)}</span></div>`;
+    else balanceRow = `<div class="totals-row"><span>Balance owed as of ${escapeHtml(fmtDate(p.date))}</span><span>${fmtMoney(0)}</span></div>`;
+  }
+  openModal(`
+    <div class="modal">
+      <div class="modal-header"><h3>Rent Receipt</h3><button class="modal-close" data-close-modal>&#10005;</button></div>
+      <div class="modal-body">
+        <div id="receiptPrintArea" class="receipt">
+          <h2>${escapeHtml(b.name)}</h2>
+          ${b.address ? `<div class="center">${escapeHtml(b.address)}</div>` : ''}
+          ${(b.phone||b.email) ? `<div class="center">${escapeHtml(b.phone||'')} ${b.phone&&b.email?' &middot; ':''} ${escapeHtml(b.email||'')}</div>` : ''}
+          <div class="divider"></div>
+          <div class="center"><strong>RENT RECEIPT</strong></div>
+          <div class="divider"></div>
+          <div>Receipt #${fmtSuiteReceipt(p.receiptNumber)}</div>
+          <div>Date received: ${fmtDate(p.date)}</div>
+          <div>Received from: ${escapeHtml(sub ? sub.name : 'Unknown')}</div>
+          <div>Space: ${escapeHtml(sub ? sub.spaceId : '-')}</div>
+          <div>Payment method: ${escapeHtml(p.paymentMethodName || '-')}</div>
+          ${sub ? `<div>Rent: ${fmtMoney(sub.amount)} ${sub.frequency==='weekly'?'weekly':'monthly'}</div>` : ''}
+          ${p.notes ? `<div>Note: ${escapeHtml(p.notes)}</div>` : ''}
+          <div class="divider"></div>
+          <div class="grand-total"><span>Amount paid</span><span>${fmtMoney(p.amount)}</span></div>
+          <div class="divider"></div>
+          ${balanceRow}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn secondary" data-close-modal>Close</button>
+        <button class="btn" id="printReceiptBtn">Print Receipt</button>
+      </div>
+    </div>
+  `);
+  document.getElementById('printReceiptBtn').addEventListener('click', ()=>window.print());
 }
 
 /* ---------------- Orders ---------------- */
@@ -1673,6 +2105,8 @@ function attachPageHandlers(){
         if(!imported.business) imported.business = { name:'My Salon', address:'', phone:'', email:'', taxRate:0, receiptNote:'' };
         if(!imported.paymentMethods) imported.paymentMethods = [{id:uid(),name:'Cash'}];
         if(!imported.expenses) imported.expenses = [];
+        if(!imported.subtenants) imported.subtenants = [];
+        if(!imported.suitePayments) imported.suitePayments = [];
         if(confirm('This will replace all current data with the backup. Continue?')){
           DATA = imported;
           saveData();
@@ -1722,6 +2156,35 @@ function handleAction(action, id, el){
   if(action==='report-week'){ reportFrom=startOfWeek(todayStr()); reportTo=todayStr(); return render(); }
   if(action==='report-month'){ reportFrom=startOfMonth(todayStr()); reportTo=todayStr(); return render(); }
   if(action==='export-report-csv'){ exportReportCsv(); return; }
+  if(action==='new-subtenant'){ openSubtenantModal(); return; }
+  if(action==='edit-subtenant'){ openSubtenantModal(subtenantById(id)); return; }
+  if(action==='open-subtenant'){ openSubtenantId = id; return render(); }
+  if(action==='back-suites'){ openSubtenantId = null; return render(); }
+  if(action==='delete-subtenant'){
+    const sub = subtenantById(id);
+    if(!sub) return;
+    const count = getSuitePayments().filter(p=>p.subtenantId===id).length;
+    const msg = count>0
+      ? 'Delete '+sub.name+' and their '+count+' recorded payment'+(count===1?'':'s')+' (including receipts)? This cannot be undone. To stop rent from coming due instead, edit the subtenant and set a lease end date.'
+      : 'Delete '+sub.name+'?';
+    if(confirm(msg)){
+      DATA.subtenants = getSubtenants().filter(s=>s.id!==id);
+      DATA.suitePayments = getSuitePayments().filter(p=>p.subtenantId!==id);
+      if(openSubtenantId===id) openSubtenantId = null;
+      saveData(); render(); toast('Subtenant deleted');
+    }
+    return;
+  }
+  if(action==='record-payment'){ openSuitePaymentModal(id); return; }
+  if(action==='view-suite-receipt'){ const p = suitePaymentById(id); if(p) openSuiteReceiptModal(p); return; }
+  if(action==='edit-suite-payment'){ const p = suitePaymentById(id); if(p) openSuitePaymentModal(null, p); return; }
+  if(action==='delete-suite-payment'){
+    if(confirm('Delete this payment and its receipt? This cannot be undone.')){
+      DATA.suitePayments = getSuitePayments().filter(p=>p.id!==id);
+      saveData(); render(); toast('Payment deleted');
+    }
+    return;
+  }
   if(action==='new-expense'){ openExpenseModal(); return; }
   if(action==='edit-expense'){ openExpenseModal(getExpenses().find(x=>x.id===id)); return; }
   if(action==='exp-prev'){ expenseMonth = shiftMonth(expenseMonth,-1); return render(); }
